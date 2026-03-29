@@ -12,8 +12,8 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
     message(FATAL_ERROR "In-source builds are not allowed. Use: cmake -B build")
 endif ()
 
-if (NOT WIN32)
-    message(FATAL_ERROR "Only Windows is supported.")
+if (NOT WIN32 AND NOT WII)
+    message(FATAL_ERROR "Only Windows and Wii are supported.")
 endif ()
 
 # --- C++ standard ---
@@ -136,9 +136,17 @@ add_custom_target(stage
 )
 
 # Add runtime target dependencies
+if (WII)
+    set(_mgrs WiiInputManager WiiSoundManager ParameterOperations)
+    set(_rasterizer CKGXRasterizer)
+else()
+    set(_mgrs Dx8InputManager Dx8SoundManager ParameterOperations)
+    set(_rasterizer CKDX9Rasterizer)
+endif()
+
 set(_runtime_targets
-        VxMath CK2 CK2_3D CKDX9Rasterizer
-        Dx8InputManager Dx8SoundManager ParameterOperations
+        VxMath CK2 CK2_3D ${_rasterizer}
+        ${_mgrs}
         AVIReader ImageReader WavReader VirtoolsLoader
         Player ConfigTool
 
