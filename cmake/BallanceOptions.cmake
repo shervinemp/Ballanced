@@ -21,13 +21,20 @@ ballance_set_cache_default(BALLANCE_DIR "" PATH
 ballance_set_cache_default(BALLANCE_TEST_CONFIG "Release" STRING
         "CTest configuration for multi-config generators")
 
+if (WII)
+    # The Wii has no dynamic loader, so every Virtools module is linked into the executable.
+    set(BALLANCE_BUILD_STATIC ON CACHE BOOL
+            "Build Player with Virtools modules linked statically" FORCE)
+endif ()
 ballance_set_cache_default(BALLANCE_BUILD_STATIC OFF BOOL
         "Build Player with Virtools modules linked statically")
 
 ballance_set_cache_default(BALLANCE_TARGET_ARCH "" STRING
         "Optional target architecture label used by platform presets")
 
-find_package(SDL3 3.4.8 CONFIG REQUIRED)
+if (NOT WII)
+    find_package(SDL3 3.4.8 CONFIG REQUIRED)
+endif ()
 
 foreach (_component IN ITEMS VXMATH CK2 CKRE)
     if (BALLANCE_BUILD_STATIC)

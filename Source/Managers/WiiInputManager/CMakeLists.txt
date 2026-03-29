@@ -9,7 +9,7 @@ set(HDRS
 )
 
 if (WII)
-    add_library(${TARGET_NAME} SHARED ${SRCS} ${HDRS})
+    add_library(${TARGET_NAME} STATIC ${SRCS} ${HDRS})
 
     target_include_directories(${TARGET_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(${TARGET_NAME} PRIVATE CK2 VxMath wiiuse)
