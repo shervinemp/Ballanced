@@ -64,13 +64,19 @@ endforeach()
 _require_dll("RenderEngines/CK2_3D")
 
 set(_has_rasterizer OFF)
-foreach(_rast IN ITEMS CKDX9Rasterizer CKGLRasterizer)
+if (WII)
+    set(_rasts CKGXRasterizer)
+else()
+    set(_rasts CKDX9Rasterizer CKGLRasterizer)
+endif()
+
+foreach(_rast IN LISTS _rasts)
     if(EXISTS "${STAGE_ROOT}/RenderEngines/${_rast}.dll" OR EXISTS "${STAGE_ROOT}/RenderEngines/lib${_rast}.dll")
         set(_has_rasterizer ON)
     endif()
 endforeach()
 if(NOT _has_rasterizer)
-    message(FATAL_ERROR "Missing rasterizer (CKDX9Rasterizer.dll/libCKDX9Rasterizer.dll or CKGLRasterizer.dll/libCKGLRasterizer.dll)")
+    message(FATAL_ERROR "Missing rasterizer (CKDX9Rasterizer.dll/libCKDX9Rasterizer.dll, CKGLRasterizer.dll/libCKGLRasterizer.dll, or CKGXRasterizer.dll/libCKGXRasterizer.dll)")
 endif()
 
 # Plugins

@@ -136,9 +136,17 @@ add_custom_target(stage
 )
 
 # Add runtime target dependencies
+if (WII)
+    set(_mgrs WiiInputManager WiiSoundManager ParameterOperations)
+    set(_rasterizer CKGXRasterizer)
+else()
+    set(_mgrs Dx8InputManager Dx8SoundManager ParameterOperations)
+    set(_rasterizer CKDX9Rasterizer)
+endif()
+
 set(_runtime_targets
-        VxMath CK2 CK2_3D CKDX9Rasterizer
-        Dx8InputManager Dx8SoundManager ParameterOperations
+        VxMath CK2 CK2_3D ${_rasterizer}
+        ${_mgrs}
         AVIReader ImageReader WavReader VirtoolsLoader
         Player ConfigTool
 
