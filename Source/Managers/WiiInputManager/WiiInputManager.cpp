@@ -1,6 +1,24 @@
 #include "WiiInputManager.h"
 #include <math.h>
 
+#ifdef WII
+#include <ogc/machine/processor.h>
+
+void SetupWiiFPU() {
+    register double fpscr;
+    // Read current FPSCR
+    __asm__("mffs %0" : "=f"(fpscr));
+
+    // Set the NI (Non-IEEE) bit to 1 to enable Flush-to-Zero for denormals
+    union { double f; uint64_t i; } u;
+    u.f = fpscr;
+    u.i |= (1ULL << 2);
+
+    // Write back to FPSCR
+    __asm__("mtfsf 255, %0" : : "f"(u.f));
+}
+#endif
+
 CKERROR CreateWiiInputManager(CKContext* context, CKBaseManager** res) {
     *res = new WiiInputManager(context);
     return CK_OK;
@@ -19,6 +37,7 @@ WiiInputManager::~WiiInputManager() {}
 
 CKERROR WiiInputManager::OnCKInit() {
 #ifdef WII
+    SetupWiiFPU();
     WPAD_Init();
     WPAD_SetDataFormat(WPAD_CHAN_0, WPAD_FMT_BTNS_ACC_IR);
 #endif
