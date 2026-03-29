@@ -41,8 +41,7 @@ CK_SOUNDMANAGER_CAPS WiiSoundManager::GetCaps() {
 
 void *WiiSoundManager::CreateSource(CK_WAVESOUND_TYPE flags, CKWaveFormat *wf, CKDWORD bytes, CKBOOL streamed) {
     WiiSoundSource* src = new WiiSoundSource();
-    src->voice_id = m_NextVoiceID++;
-    if (m_NextVoiceID > 15) m_NextVoiceID = 0; // limit to available voices
+    src->voice_id = -1; // Assigned dynamically on play
 
     src->byte_size = bytes;
     src->sample_rate = wf ? wf->nSamplesPerSec : 44100;
@@ -70,8 +69,12 @@ void *WiiSoundManager::CreateSource(CK_WAVESOUND_TYPE flags, CKWaveFormat *wf, C
 
 void *WiiSoundManager::DuplicateSource(void *source) {
     if (!source) return NULL;
-    WiiSoundSource* src = (WiiSoundSource*)source;
-    return CreateSource(src->type, &src->format, src->byte_size, FALSE);
+    WiiSoundSource* orig_src = (WiiSoundSource*)source;
+    WiiSoundSource* src = (WiiSoundSource*)CreateSource(orig_src->type, &orig_src->format, orig_src->byte_size, FALSE);
+    if (src && src->pcm_data && orig_src->pcm_data) {
+        memcpy(src->pcm_data, orig_src->pcm_data, orig_src->byte_size);
+    }
+    return src;
 }
 
 void WiiSoundManager::ReleaseSource(void *source) {
@@ -165,7 +168,10 @@ void WiiSoundManager::InternalPause(void *source) {
     WiiSoundSource* src = (WiiSoundSource*)source;
     src->is_playing = FALSE;
 #ifdef WII
-    ASND_StopVoice(src->voice_id);
+    if (src->voice_id >= 0) {
+        ASND_StopVoice(src->voice_id);
+        src->voice_id = -1;
+    }
 #endif
 }
 
@@ -177,6 +183,10 @@ void WiiSoundManager::InternalPlay(void *source, CKBOOL loop) {
 
 #ifdef WII
     DCFlushRange(src->pcm_data, src->byte_size);
+
+    src->voice_id = m_NextVoiceID++;
+    if (m_NextVoiceID > 15) m_NextVoiceID = 0;
+
     ASND_StopVoice(src->voice_id);
 
     // Simplistic mapping, typically dr_wav decodes to 16bit Stereo. Format checks would ideally be deeper.
