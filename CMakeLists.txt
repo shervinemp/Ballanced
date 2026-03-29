@@ -12,8 +12,8 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
     message(FATAL_ERROR "In-source builds are not allowed. Use: cmake -B build")
 endif ()
 
-if (NOT WIN32)
-    message(FATAL_ERROR "Only Windows is supported.")
+if (NOT WIN32 AND NOT WII)
+    message(FATAL_ERROR "Only Windows and Wii are supported.")
 endif ()
 
 # --- C++ standard ---
