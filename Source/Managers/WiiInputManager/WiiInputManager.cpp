@@ -3,6 +3,7 @@
 
 #ifdef WII
 #include <ogc/machine/processor.h>
+#include <wiiuse/wpad.h>
 
 void SetupWiiFPU() {
     register double fpscr;
@@ -74,7 +75,21 @@ CKBOOL WiiInputManager::IsMouseButtonDown(CK_MOUSEBUTTON iButton) { return FALSE
 CKBOOL WiiInputManager::IsMouseClicked(CK_MOUSEBUTTON iButton) { return FALSE; }
 CKBOOL WiiInputManager::IsMouseToggled(CK_MOUSEBUTTON iButton) { return FALSE; }
 void WiiInputManager::GetMouseButtonsState(CKBYTE oStates[4]) { for(int i=0;i<4;++i) oStates[i]=0; }
-void WiiInputManager::GetMousePosition(Vx2DVector &oPosition, CKBOOL iAbsolute) { oPosition.Set(0,0); }
+void WiiInputManager::GetMousePosition(Vx2DVector &oPosition, CKBOOL iAbsolute) {
+#ifdef WII
+    WPADData* data = WPAD_Data(WPAD_CHAN_0);
+    // Check if the IR camera sees the sensor bar
+    if (data->ir.valid) {
+        // Map the raw IR coordinates (usually 1024x768 internal) to standard 640x480 screen space
+        oPosition.x = (data->ir.x / 1024.0f) * 640.0f;
+        oPosition.y = (data->ir.y / 768.0f) * 480.0f;
+    } else {
+        oPosition.Set(0, 0);
+    }
+#else
+    oPosition.Set(0, 0);
+#endif
+}
 void WiiInputManager::GetMouseRelativePosition(VxVector &oPosition) { oPosition.Set(0,0,0); }
 CKBOOL WiiInputManager::IsMouseAttached() { return FALSE; }
 

@@ -51,7 +51,12 @@ foreach(_dir IN ITEMS Bin Managers RenderEngines Plugins BuildingBlocks)
 endforeach()
 
 # Core binaries
-_require_file(Bin/Player.exe)
+if(EXISTS "${STAGE_ROOT}/boot.dol")
+    message(STATUS "[StageLayout] Found boot.dol (Wii)")
+else()
+    _require_file(Bin/Player.exe)
+endif()
+
 _require_dll(Bin/CK2)
 _require_dll(Bin/VxMath)
 

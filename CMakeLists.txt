@@ -72,6 +72,7 @@ add_compile_definitions(
         $<$<C_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>
         $<$<C_COMPILER_ID:MSVC>:_CRT_NONSTDC_NO_WARNINGS>
         $<$<CONFIG:Debug>:DEBUG>
+        $<$<BOOL:${WII}>:IVP_NO_DOUBLE>
 )
 
 # --- Visual Studio specific settings ---
@@ -158,7 +159,7 @@ set(_runtime_targets
         VxMath CK2 CK2_3D ${_rasterizer}
         ${_mgrs}
         AVIReader ImageReader WavReader VirtoolsLoader
-        Player ConfigTool
+        ConfigTool
 
         # Building blocks (DLL output names may differ from target names)
         3DTrans Cameras Collision Controllers Grids Interface Lights Logics Materials
@@ -167,6 +168,12 @@ set(_runtime_targets
         physics_RT TT_DatabaseManager_RT TT_Gravity_RT TT_InterfaceManager_RT
         TT_ParticleSystems_RT TT_Toolbox_RT
 )
+
+if (WII)
+    list(APPEND _runtime_targets WiiPlayer)
+else()
+    list(APPEND _runtime_targets Player)
+endif()
 
 foreach (_target IN LISTS _runtime_targets)
     if (TARGET ${_target})
