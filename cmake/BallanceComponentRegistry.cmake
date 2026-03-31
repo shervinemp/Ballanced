@@ -56,8 +56,14 @@ set(BALLANCE_MODULE_RUNTIME_TARGETS
         ${BALLANCE_BUILDING_BLOCK_RUNTIME_TARGETS}
 )
 
+if (WII)
+    set(_ballance_player_target WiiPlayer)
+else ()
+    set(_ballance_player_target Player)
+endif ()
+
 set(BALLANCE_RUNTIME_TARGETS
         ${BALLANCE_CORE_RUNTIME_TARGETS}
         ${BALLANCE_MODULE_RUNTIME_TARGETS}
-        Player
+        ${_ballance_player_target}
 )

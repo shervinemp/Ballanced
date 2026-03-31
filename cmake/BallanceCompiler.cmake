@@ -8,6 +8,7 @@ add_compile_definitions(
         $<$<C_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>
         $<$<C_COMPILER_ID:MSVC>:_CRT_NONSTDC_NO_WARNINGS>
         $<$<CONFIG:Debug>:DEBUG>
+        $<$<BOOL:${WII}>:IVP_NO_DOUBLE>
 )
 
 if (MSVC)
