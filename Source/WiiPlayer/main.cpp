@@ -13,7 +13,10 @@
 int main(int argc, char** argv) {
 #ifdef WII
     // Initialize the Wii video and hardware subsystems
-    VIDEO_Init();
+
+
+    // Maximize available memory by expanding the heap into MEM2
+    SYS_SetArena1Hi(SYS_GetArena1Lo());
 
     // Initialize the FAT filesystem (SD Card / USB)
     if (!fatInitDefault()) {

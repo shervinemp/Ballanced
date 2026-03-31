@@ -10,6 +10,11 @@
 #define DEFAULT_FIFO_SIZE (256 * 1024)
 static void* gp_Fifo = NULL;
 
+// Video state globals
+void* frameBuffer[2] = {NULL, NULL};
+int currentFb = 0;
+GXRModeObj* rmode = NULL;
+
 CKGXRasterizer::CKGXRasterizer() {}
 CKGXRasterizer::~CKGXRasterizer() {}
 
@@ -46,5 +51,20 @@ void CKGXRasterizer::InitGPU() {
     GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_F32, 0);
     GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_NRM, GX_NRM_XYZ, GX_F32, 0);
     GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_TEX_ST, GX_F32, 0);
+
+    // Initialize Video System
+    VIDEO_Init();
+    rmode = VIDEO_GetPreferredMode(NULL);
+
+    // Allocate two framebuffers in MEM1 (32-byte aligned for DMA)
+    frameBuffer[0] = MEM_K0_TO_K1(SYS_AllocateFramebuffer(rmode));
+    frameBuffer[1] = MEM_K0_TO_K1(SYS_AllocateFramebuffer(rmode));
+
+    VIDEO_Configure(rmode);
+    VIDEO_SetNextFramebuffer(frameBuffer[0]);
+    VIDEO_SetBlack(FALSE);
+    VIDEO_Flush();
+    VIDEO_WaitVSync();
+    if(rmode->viTVMode & VI_NON_INTERLACE) VIDEO_WaitVSync();
 #endif
 }
