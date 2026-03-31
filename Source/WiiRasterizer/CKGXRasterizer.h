@@ -27,6 +27,11 @@ public:
     virtual CKBOOL SetTexture(CKDWORD Texture, CKDWORD Stage = 0);
     virtual CKBOOL SetRenderState(VXRENDERSTATETYPE State, CKDWORD Value);
     virtual CKBOOL DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indices, int indexcount, VxDrawPrimitiveData *data);
+
+    // Matrix methods
+    void SetProjectionMatrix(const VxMatrix& projMat);
+    void SetWorldViewMatrix(const VxMatrix& worldMat, const VxMatrix& viewMat);
+    void Present();
 };
 
 #endif // CKGXRASTERIZER_H
