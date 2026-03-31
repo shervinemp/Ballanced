@@ -61,9 +61,27 @@ CKERROR WiiInputManager::PreProcess() {
 
 void WiiInputManager::EnableKeyboardRepetition(CKBOOL iEnable) {}
 CKBOOL WiiInputManager::IsKeyboardRepetitionEnabled() { return FALSE; }
-CKBOOL WiiInputManager::IsKeyDown(CKDWORD iKey, CKDWORD *oStamp) { return FALSE; }
+CKBOOL WiiInputManager::IsKeyDown(CKDWORD iKey, CKDWORD *oStamp) {
+#ifdef WII
+    u32 held = WPAD_ButtonsHeld(WPAD_CHAN_0);
+
+    if (iKey == KEY_LSHIFT && (held & WPAD_BUTTON_LEFT)) return TRUE;
+    if (iKey == KEY_SPACE  && (held & WPAD_BUTTON_RIGHT)) return TRUE;
+    if (iKey == KEY_ESCAPE && (held & WPAD_BUTTON_PLUS)) return TRUE;
+#endif
+    return FALSE;
+}
 CKBOOL WiiInputManager::IsKeyUp(CKDWORD iKey) { return TRUE; }
-CKBOOL WiiInputManager::IsKeyToggled(CKDWORD iKey, CKDWORD *oStamp) { return FALSE; }
+CKBOOL WiiInputManager::IsKeyToggled(CKDWORD iKey, CKDWORD *oStamp) {
+#ifdef WII
+    u32 pressed = WPAD_ButtonsDown(WPAD_CHAN_0);
+
+    if (iKey == KEY_LSHIFT && (pressed & WPAD_BUTTON_LEFT)) return TRUE;
+    if (iKey == KEY_SPACE  && (pressed & WPAD_BUTTON_RIGHT)) return TRUE;
+    if (iKey == KEY_ESCAPE && (pressed & WPAD_BUTTON_PLUS)) return TRUE;
+#endif
+    return FALSE;
+}
 int WiiInputManager::GetKeyName(CKDWORD iKey, char *oKeyName) { if(oKeyName) oKeyName[0]=0; return 0; }
 CKDWORD WiiInputManager::GetKeyFromName(CKSTRING iKeyName) { return 0; }
 unsigned char *WiiInputManager::GetKeyboardState() { static unsigned char state[256]={0}; return state; }
@@ -71,11 +89,26 @@ CKBOOL WiiInputManager::IsKeyboardAttached() { return FALSE; }
 int WiiInputManager::GetNumberOfKeyInBuffer() { return 0; }
 int WiiInputManager::GetKeyFromBuffer(int i, CKDWORD &oKey, CKDWORD *oTimeStamp) { return 0; }
 
-CKBOOL WiiInputManager::IsMouseButtonDown(CK_MOUSEBUTTON iButton) { return FALSE; }
-CKBOOL WiiInputManager::IsMouseClicked(CK_MOUSEBUTTON iButton) { return FALSE; }
+CKBOOL WiiInputManager::IsMouseButtonDown(CK_MOUSEBUTTON iButton) {
+#ifdef WII
+    if (iButton == CK_MOUSEBUTTON_LEFT) {
+        return (WPAD_ButtonsHeld(WPAD_CHAN_0) & WPAD_BUTTON_A) ? TRUE : FALSE;
+    }
+#endif
+    return FALSE;
+}
+CKBOOL WiiInputManager::IsMouseClicked(CK_MOUSEBUTTON iButton) {
+#ifdef WII
+    if (iButton == CK_MOUSEBUTTON_LEFT) {
+        return (WPAD_ButtonsDown(WPAD_CHAN_0) & WPAD_BUTTON_A) ? TRUE : FALSE;
+    }
+#endif
+    return FALSE;
+}
 CKBOOL WiiInputManager::IsMouseToggled(CK_MOUSEBUTTON iButton) { return FALSE; }
 void WiiInputManager::GetMouseButtonsState(CKBYTE oStates[4]) { for(int i=0;i<4;++i) oStates[i]=0; }
 void WiiInputManager::GetMousePosition(Vx2DVector &oPosition, CKBOOL iAbsolute) {
+    oPosition.Set(0,0);
 #ifdef WII
     WPADData* data = WPAD_Data(WPAD_CHAN_0);
     // Check if the IR camera sees the sensor bar
@@ -83,11 +116,7 @@ void WiiInputManager::GetMousePosition(Vx2DVector &oPosition, CKBOOL iAbsolute) 
         // Map the raw IR coordinates (usually 1024x768 internal) to standard 640x480 screen space
         oPosition.x = (data->ir.x / 1024.0f) * 640.0f;
         oPosition.y = (data->ir.y / 768.0f) * 480.0f;
-    } else {
-        oPosition.Set(0, 0);
     }
-#else
-    oPosition.Set(0, 0);
 #endif
 }
 void WiiInputManager::GetMouseRelativePosition(VxVector &oPosition) { oPosition.Set(0,0,0); }
@@ -102,12 +131,16 @@ void WiiInputManager::GetJoystickPosition(int iJoystick, VxVector *oPosition) {
 #ifdef WII
     if (iJoystick == 0) {
         WPADData* data = WPAD_Data(WPAD_CHAN_0);
-        if (data->exp.type == WPAD_EXP_NUNCHUK) {
-            struct joystick_t js = data->exp.nunchuk.mag;
-            // Map Nunchuk joystick
-            oPosition->x = js.mag * cos(js.ang);
-            oPosition->y = js.mag * sin(js.ang);
-        }
+        float tiltX = data->orient.roll / 25.0f;
+        float tiltY = data->orient.pitch / 25.0f;
+        if (tiltX > 1.0f) tiltX = 1.0f;
+        if (tiltX < -1.0f) tiltX = -1.0f;
+        if (tiltY > 1.0f) tiltY = 1.0f;
+        if (tiltY < -1.0f) tiltY = -1.0f;
+        if (fabsf(tiltX) < 0.15f) tiltX = 0.0f;
+        if (fabsf(tiltY) < 0.15f) tiltY = 0.0f;
+        oPosition->x = tiltX;
+        oPosition->y = tiltY;
     }
 #endif
 }
