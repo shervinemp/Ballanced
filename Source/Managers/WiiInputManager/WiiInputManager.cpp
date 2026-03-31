@@ -3,6 +3,7 @@
 
 #ifdef WII
 #include <ogc/machine/processor.h>
+#include <wiiuse/wpad.h>
 
 void SetupWiiFPU() {
     register double fpscr;
