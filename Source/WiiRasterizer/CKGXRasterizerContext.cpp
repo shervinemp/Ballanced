@@ -10,7 +10,7 @@ CKGXRasterizerContext::~CKGXRasterizerContext() {}
 
 #ifdef WII
 // --- Helper Functions to convert Virtools matrices to Wii hardware matrices ---
-void ConvertProjectionMatrix(const VxMatrix& vxMat, Mtx44& gxMat) {
+static void ConvertProjectionMatrix(const VxMatrix& vxMat, Mtx44& gxMat) {
     // Virtools is row-major, GX Mtx44 is a 4x4 float array.
     for (int r = 0; r < 4; r++) {
         for (int c = 0; c < 4; c++) {
@@ -19,7 +19,7 @@ void ConvertProjectionMatrix(const VxMatrix& vxMat, Mtx44& gxMat) {
     }
 }
 
-void ConvertModelViewMatrix(const VxMatrix& vxMat, Mtx& gxMat) {
+static void ConvertModelViewMatrix(const VxMatrix& vxMat, Mtx& gxMat) {
     // Virtools is 4x4 row-major. GX Mtx is 3x4 (drops the bottom row [0, 0, 0, 1]).
     for (int r = 0; r < 3; r++) {
         for (int c = 0; c < 4; c++) {
