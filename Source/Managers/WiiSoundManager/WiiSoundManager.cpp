@@ -159,8 +159,94 @@ CK_WAVESOUND_TYPE WiiSoundManager::GetType(void *source) {
 }
 
 void WiiSoundManager::UpdateSettings(void *source, CK_SOUNDMANAGER_CAPS settingsoptions, CKWaveSoundSettings &settings, CKBOOL set) {}
-void WiiSoundManager::Update3DSettings(void *source, CK_SOUNDMANAGER_CAPS settingsoptions, CKWaveSound3DSettings &settings, CKBOOL set) {}
-void WiiSoundManager::UpdateListenerSettings(CK_SOUNDMANAGER_CAPS settingsoptions, CKListenerSettings &settings, CKBOOL set) {}
+
+void WiiSoundManager::Update3DSettings(void *source, CK_SOUNDMANAGER_CAPS settingsoptions, CKWaveSound3DSettings &settings, CKBOOL set) {
+#ifdef WII
+    if (!source) return;
+    WiiSoundSource* src = (WiiSoundSource*)source;
+    if (src->voice_id < 0) return;
+
+    // A complete 3D spatialization needs listener coordinates and distance attenuation algorithms.
+    // For a basic implementation, we extract distance from properties if provided,
+    // or we can calculate a pseudo pan from X coordinates if known.
+    // For now, hook into ASND_SetVoiceVolume and ASND_SetVoicePan
+    // using simplified values based on typical 3D settings.
+
+    // Update volume based on distance (stubbed mapping from 3D coords, needs listener global vars to be exact)
+    // If we have settings we can approximate panning and volume.
+    // settings.Position (VxVector) holds the sound position.
+    // We would compare this to a global Listener vector updated in UpdateListenerSettings.
+
+    // Extract sound position
+    VxVector soundPos = settings.m_Position;
+
+    // We need the listener position. For now, since CKListenerSettings doesn't contain a position
+    // and querying the active camera from CKRenderContext is complex, we will assume a stationary listener at origin
+    // or you could hook into a global updated by the game logic.
+    extern VxVector g_ListenerPos;
+    extern VxVector g_ListenerRight; // For panning
+
+    // Calculate distance
+    VxVector diff = soundPos - g_ListenerPos;
+    float dist = diff.Magnitude();
+
+    // Calculate volume attenuation (simple linear fallback)
+    // You can use settings.m_MinDistance and settings.m_MaxDistance for a proper curve
+    float minD = settings.m_MinDistance > 0.1f ? settings.m_MinDistance : 1.0f;
+    float maxD = settings.m_MaxDistance > minD ? settings.m_MaxDistance : 1000.0f;
+
+    float volScale = 1.0f;
+    if (dist > minD) {
+        if (dist >= maxD) {
+            volScale = 0.0f;
+        } else {
+            // Linear attenuation between min and max
+            volScale = 1.0f - ((dist - minD) / (maxD - minD));
+        }
+    }
+
+    int baseVol = (int)(src->volume * volScale);
+    if (baseVol < 0) baseVol = 0;
+    if (baseVol > 255) baseVol = 255;
+
+    // Calculate pan: dot product of listener's right vector and the normalized direction to the sound
+    float dotRight = 0.0f; // Center default
+    if (dist > 0.001f) {
+        VxVector dir = diff / dist;
+        dotRight = DotProduct(dir, g_ListenerRight); // Range [-1.0, 1.0]
+    }
+
+    // Convert pan to left/right volume balance
+    // -1.0 means full left (left = baseVol, right = 0)
+    //  1.0 means full right (left = 0, right = baseVol)
+    int leftVol = baseVol;
+    int rightVol = baseVol;
+
+    if (dotRight < 0.0f) {
+        // Panned left: reduce right volume
+        rightVol = (int)(baseVol * (1.0f + dotRight));
+    } else if (dotRight > 0.0f) {
+        // Panned right: reduce left volume
+        leftVol = (int)(baseVol * (1.0f - dotRight));
+    }
+
+    ASND_SetVoiceVolume(src->voice_id, leftVol, rightVol);
+#endif
+}
+
+#ifdef WII
+VxVector g_ListenerPos(0.0f, 0.0f, 0.0f);
+VxVector g_ListenerRight(1.0f, 0.0f, 0.0f);
+#endif
+
+void WiiSoundManager::UpdateListenerSettings(CK_SOUNDMANAGER_CAPS settingsoptions, CKListenerSettings &settings, CKBOOL set) {
+#ifdef WII
+    // CKListenerSettings does not contain global listener coordinates.
+    // In a real Virtools engine setup, the listener position is updated directly
+    // from the active camera (e.g., GetRenderContext()->GetAttachedCamera()).
+    // We would fetch and store g_ListenerPos and g_ListenerRight here.
+#endif
+}
 CKBOOL WiiSoundManager::IsInitialized() { return m_Initialized; }
 
 void WiiSoundManager::InternalPause(void *source) {
@@ -189,8 +275,14 @@ void WiiSoundManager::InternalPlay(void *source, CKBOOL loop) {
 
     ASND_StopVoice(src->voice_id);
 
-    // Simplistic mapping, typically dr_wav decodes to 16bit Stereo. Format checks would ideally be deeper.
     int format = VOICE_STEREO_16BIT;
+    if (src->format.nChannels == 1) {
+        if (src->format.wBitsPerSample == 8) format = VOICE_MONO_8BIT;
+        else format = VOICE_MONO_16BIT;
+    } else {
+        if (src->format.wBitsPerSample == 8) format = VOICE_STEREO_8BIT;
+        else format = VOICE_STEREO_16BIT;
+    }
 
     ASND_SetVoice(
         src->voice_id,
