@@ -61,13 +61,35 @@ CKERROR WiiInputManager::PreProcess() {
 
 void WiiInputManager::EnableKeyboardRepetition(CKBOOL iEnable) {}
 CKBOOL WiiInputManager::IsKeyboardRepetitionEnabled() { return FALSE; }
+// --- Simple Configurable Input Mapping Array ---
+// This is a minimal abstraction to map Wii buttons to Virtools KEY constants.
+// For a full production system, this could read from a settings file.
+#ifdef WII
+struct WiimoteKeyMap {
+    CKDWORD vkKey;
+    u32 wpadButton;
+};
+
+static const WiimoteKeyMap g_KeyMap[] = {
+    {KEY_LSHIFT, WPAD_BUTTON_LEFT | WPAD_NUNCHUK_BUTTON_C | WPAD_CLASSIC_BUTTON_Y},  // Ball change / Action
+    {KEY_SPACE,  WPAD_BUTTON_RIGHT | WPAD_NUNCHUK_BUTTON_Z | WPAD_CLASSIC_BUTTON_A}, // Jump
+    {KEY_ESCAPE, WPAD_BUTTON_PLUS | WPAD_CLASSIC_BUTTON_PLUS},                       // Pause / Menu
+    {KEY_UP,     WPAD_BUTTON_UP | WPAD_CLASSIC_BUTTON_UP},
+    {KEY_DOWN,   WPAD_BUTTON_DOWN | WPAD_CLASSIC_BUTTON_DOWN},
+    {KEY_RETURN, WPAD_BUTTON_A | WPAD_CLASSIC_BUTTON_A}                              // Select
+};
+static const int g_NumKeys = sizeof(g_KeyMap) / sizeof(WiimoteKeyMap);
+#endif
+
 CKBOOL WiiInputManager::IsKeyDown(CKDWORD iKey, CKDWORD *oStamp) {
 #ifdef WII
     u32 held = WPAD_ButtonsHeld(WPAD_CHAN_0);
 
-    if (iKey == KEY_LSHIFT && (held & WPAD_BUTTON_LEFT)) return TRUE;
-    if (iKey == KEY_SPACE  && (held & WPAD_BUTTON_RIGHT)) return TRUE;
-    if (iKey == KEY_ESCAPE && (held & WPAD_BUTTON_PLUS)) return TRUE;
+    for (int i = 0; i < g_NumKeys; i++) {
+        if (g_KeyMap[i].vkKey == iKey && (held & g_KeyMap[i].wpadButton)) {
+            return TRUE;
+        }
+    }
 #endif
     return FALSE;
 }
@@ -76,9 +98,11 @@ CKBOOL WiiInputManager::IsKeyToggled(CKDWORD iKey, CKDWORD *oStamp) {
 #ifdef WII
     u32 pressed = WPAD_ButtonsDown(WPAD_CHAN_0);
 
-    if (iKey == KEY_LSHIFT && (pressed & WPAD_BUTTON_LEFT)) return TRUE;
-    if (iKey == KEY_SPACE  && (pressed & WPAD_BUTTON_RIGHT)) return TRUE;
-    if (iKey == KEY_ESCAPE && (pressed & WPAD_BUTTON_PLUS)) return TRUE;
+    for (int i = 0; i < g_NumKeys; i++) {
+        if (g_KeyMap[i].vkKey == iKey && (pressed & g_KeyMap[i].wpadButton)) {
+            return TRUE;
+        }
+    }
 #endif
     return FALSE;
 }
@@ -114,8 +138,17 @@ void WiiInputManager::GetMousePosition(Vx2DVector &oPosition, CKBOOL iAbsolute) 
     // Check if the IR camera sees the sensor bar
     if (data->ir.valid) {
         // Map the raw IR coordinates (usually 1024x768 internal) to standard 640x480 screen space
-        oPosition.x = (data->ir.x / 1024.0f) * 640.0f;
-        oPosition.y = (data->ir.y / 768.0f) * 480.0f;
+        float mapX = (data->ir.x / 1024.0f) * 640.0f;
+        float mapY = (data->ir.y / 768.0f) * 480.0f;
+
+        // Clamp bounds to prevent cursor escaping screen space (which could cause UI issues)
+        if (mapX < 0.0f) mapX = 0.0f;
+        if (mapX > 640.0f) mapX = 640.0f;
+        if (mapY < 0.0f) mapY = 0.0f;
+        if (mapY > 480.0f) mapY = 480.0f;
+
+        oPosition.x = mapX;
+        oPosition.y = mapY;
     }
 #endif
 }
@@ -131,16 +164,28 @@ void WiiInputManager::GetJoystickPosition(int iJoystick, VxVector *oPosition) {
 #ifdef WII
     if (iJoystick == 0) {
         WPADData* data = WPAD_Data(WPAD_CHAN_0);
-        float tiltX = data->orient.roll / 25.0f;
-        float tiltY = data->orient.pitch / 25.0f;
-        if (tiltX > 1.0f) tiltX = 1.0f;
-        if (tiltX < -1.0f) tiltX = -1.0f;
-        if (tiltY > 1.0f) tiltY = 1.0f;
-        if (tiltY < -1.0f) tiltY = -1.0f;
-        if (fabsf(tiltX) < 0.15f) tiltX = 0.0f;
-        if (fabsf(tiltY) < 0.15f) tiltY = 0.0f;
-        oPosition->x = tiltX;
-        oPosition->y = tiltY;
+        if (data->exp.type == WPAD_EXP_NUNCHUK) {
+            float nX = data->exp.nunchuk.js.mag * sinf(data->exp.nunchuk.js.ang * (3.14159f / 180.0f));
+            float nY = data->exp.nunchuk.js.mag * cosf(data->exp.nunchuk.js.ang * (3.14159f / 180.0f));
+            oPosition->x = nX;
+            oPosition->y = nY;
+        } else if (data->exp.type == WPAD_EXP_CLASSIC) {
+            float cX = data->exp.classic.ljs.mag * sinf(data->exp.classic.ljs.ang * (3.14159f / 180.0f));
+            float cY = data->exp.classic.ljs.mag * cosf(data->exp.classic.ljs.ang * (3.14159f / 180.0f));
+            oPosition->x = cX;
+            oPosition->y = cY;
+        } else {
+            float tiltX = data->orient.roll / 25.0f;
+            float tiltY = data->orient.pitch / 25.0f;
+            if (tiltX > 1.0f) tiltX = 1.0f;
+            if (tiltX < -1.0f) tiltX = -1.0f;
+            if (tiltY > 1.0f) tiltY = 1.0f;
+            if (tiltY < -1.0f) tiltY = -1.0f;
+            if (fabsf(tiltX) < 0.15f) tiltX = 0.0f;
+            if (fabsf(tiltY) < 0.15f) tiltY = 0.0f;
+            oPosition->x = tiltX;
+            oPosition->y = tiltY;
+        }
     }
 #endif
 }
