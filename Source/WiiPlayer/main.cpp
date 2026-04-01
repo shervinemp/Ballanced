@@ -65,15 +65,7 @@ int main(int argc, char** argv) {
         return -1;
     }
 
-    // Replace blocking player.Run() with a loop that checks for Home button exit
-    while (player.Update()) {
-#ifdef WII
-        WPAD_ScanPads();
-        if (WPAD_ButtonsDown(0) & WPAD_BUTTON_HOME) {
-            break; // Graceful exit back to Wii Menu / Homebrew Channel
-        }
-#endif
-    }
+    player.Run();
 
     player.Shutdown();
 
