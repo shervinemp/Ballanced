@@ -5,7 +5,17 @@
 #include <ogc/gu.h>
 #endif
 
-CKGXRasterizerContext::CKGXRasterizerContext() {}
+CKGXRasterizerContext::CKGXRasterizerContext() {
+#ifdef WII
+    m_ZEnable = GX_TRUE;
+    m_ZWriteEnable = GX_TRUE;
+    m_ZFunc = GX_LEQUAL;
+    m_AlphaBlendEnable = GX_FALSE;
+    m_SrcBlend = GX_BL_SRCALPHA;
+    m_DestBlend = GX_BL_INVSRCALPHA;
+    m_CullMode = GX_CULL_NONE;
+#endif
+}
 CKGXRasterizerContext::~CKGXRasterizerContext() {}
 
 #ifdef WII
@@ -92,24 +102,86 @@ CKBOOL CKGXRasterizerContext::SetTexture(CKDWORD Texture, CKDWORD Stage) {
     u32 texHeight = GX_GetTexObjHeight(texObj);
     DCFlushRange(texData, texWidth * texHeight * 4); // Assuming 32-bit RGBA8 for the flush size
 
-    // Bind texture to hardware map 0
-    GX_LoadTexObj(texObj, GX_TEXMAP0);
+    // Bind texture to the specific hardware map based on Stage
+    u32 texMap = GX_TEXMAP0 + Stage;
+    GX_LoadTexObj(texObj, texMap);
 
-    // Tell the GPU we are using 1 texture generation and 1 TEV stage
-    GX_SetNumTexGens(1);
-    GX_SetNumTevStages(1);
-    GX_SetTexCoordGen(GX_TEXCOORD0, GX_TG_MTX2x4, GX_TG_TEX0, GX_IDENTITY);
+    // Tell the GPU we are using N texture generations and N TEV stages
+    // This is simplistic and assumes stages are set sequentially
+    GX_SetNumTexGens(Stage + 1);
+    GX_SetNumTevStages(Stage + 1);
 
-    // Set the TEV operation to Modulate (Texture Color * Vertex Color)
-    GX_SetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR0A0);
-    GX_SetTevOp(GX_TEVSTAGE0, GX_MODULATE);
+    u32 texCoord = GX_TEXCOORD0 + Stage;
+    u32 tevStage = GX_TEVSTAGE0 + Stage;
+
+    // Coordinate generation
+    GX_SetTexCoordGen(texCoord, GX_TG_MTX2x4, GX_TG_TEX0 + Stage, GX_IDENTITY);
+
+    // TEV Stage Configuration
+    // If it's the first stage, use rasterized color (vertex color).
+    // For multi-texturing (Stage > 0), blend with the previous TEV output.
+    u32 colorIn = (Stage == 0) ? GX_COLOR0A0 : GX_COLORPREV;
+    GX_SetTevOrder(tevStage, texCoord, texMap, colorIn);
+    GX_SetTevOp(tevStage, GX_MODULATE);
 #endif
     return TRUE;
 }
 
 CKBOOL CKGXRasterizerContext::SetRenderState(VXRENDERSTATETYPE State, CKDWORD Value) {
 #ifdef WII
-    // Handle various render states mapping to GX functions here.
+    switch (State) {
+        case VXRENDERSTATE_ZENABLE:
+            m_ZEnable = Value ? GX_TRUE : GX_FALSE;
+            GX_SetZMode(m_ZEnable, m_ZFunc, m_ZWriteEnable);
+            break;
+        case VXRENDERSTATE_ZWRITEENABLE:
+            m_ZWriteEnable = Value ? GX_TRUE : GX_FALSE;
+            GX_SetZMode(m_ZEnable, m_ZFunc, m_ZWriteEnable);
+            break;
+        case VXRENDERSTATE_ZFUNC: {
+            static const u8 cmpFuncs[] = {
+                GX_NEVER, GX_NEVER, GX_LESS, GX_EQUAL,
+                GX_LEQUAL, GX_GREATER, GX_NEQUALS, GX_GEQUAL, GX_ALWAYS
+            };
+            if (Value <= 8) m_ZFunc = cmpFuncs[Value];
+            GX_SetZMode(m_ZEnable, m_ZFunc, m_ZWriteEnable);
+            break;
+        }
+        case VXRENDERSTATE_ALPHABLENDENABLE:
+            m_AlphaBlendEnable = Value ? GX_TRUE : GX_FALSE;
+            GX_SetBlendMode(m_AlphaBlendEnable ? GX_BM_BLEND : GX_BM_NONE, m_SrcBlend, m_DestBlend, GX_LO_CLEAR);
+            break;
+        case VXRENDERSTATE_SRCBLEND: {
+            static const u8 blendFactors[] = {
+                GX_BL_ZERO, GX_BL_ZERO, GX_BL_ONE, GX_BL_SRCCLR, GX_BL_INVSRCCLR,
+                GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_BL_DSTALPHA, GX_BL_INVDSTALPHA,
+                GX_BL_DSTCLR, GX_BL_INVDSTCLR, GX_BL_SRCALPHA, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA
+            };
+            if (Value <= 13) m_SrcBlend = blendFactors[Value];
+            GX_SetBlendMode(m_AlphaBlendEnable ? GX_BM_BLEND : GX_BM_NONE, m_SrcBlend, m_DestBlend, GX_LO_CLEAR);
+            break;
+        }
+        case VXRENDERSTATE_DESTBLEND: {
+            static const u8 blendFactors[] = {
+                GX_BL_ZERO, GX_BL_ZERO, GX_BL_ONE, GX_BL_SRCCLR, GX_BL_INVSRCCLR,
+                GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_BL_DSTALPHA, GX_BL_INVDSTALPHA,
+                GX_BL_DSTCLR, GX_BL_INVDSTCLR, GX_BL_SRCALPHA, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA
+            };
+            if (Value <= 13) m_DestBlend = blendFactors[Value];
+            GX_SetBlendMode(m_AlphaBlendEnable ? GX_BM_BLEND : GX_BM_NONE, m_SrcBlend, m_DestBlend, GX_LO_CLEAR);
+            break;
+        }
+        case VXRENDERSTATE_CULLMODE: {
+            static const u8 cullModes[] = {
+                GX_CULL_NONE, GX_CULL_NONE, GX_CULL_BACK, GX_CULL_FRONT
+            };
+            if (Value <= 3) m_CullMode = cullModes[Value];
+            GX_SetCullMode(m_CullMode);
+            break;
+        }
+        default:
+            break;
+    }
 #endif
     return TRUE;
 }

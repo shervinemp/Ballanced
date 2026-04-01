@@ -28,6 +28,20 @@ public:
     virtual CKBOOL SetRenderState(VXRENDERSTATETYPE State, CKDWORD Value);
     virtual CKBOOL DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indices, int indexcount, VxDrawPrimitiveData *data);
 
+protected:
+#ifdef WII
+    u8 m_ZEnable;
+    u8 m_ZWriteEnable;
+    u8 m_ZFunc;
+
+    u8 m_AlphaBlendEnable;
+    u8 m_SrcBlend;
+    u8 m_DestBlend;
+
+    u8 m_CullMode;
+#endif
+
+public:
     // Matrix methods
     void SetProjectionMatrix(const VxMatrix& projMat);
     void SetWorldViewMatrix(const VxMatrix& worldMat, const VxMatrix& viewMat);

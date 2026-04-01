@@ -6,14 +6,33 @@
 #ifdef WII
 #include <gccore.h>
 #include <fat.h>
+#include <wiiuse/wpad.h>
+#include <isfs.h>
 
-
+void PowerCallback(s32 chan) {
+    exit(0);
+}
 #endif
 
 int main(int argc, char** argv) {
 #ifdef WII
     // Initialize the Wii video and hardware subsystems
+    VIDEO_Init();
+    WPAD_Init();
+    ISFS_Initialize();
 
+    // Configure video mode based on hardware settings
+    GXRModeObj* rmode = VIDEO_GetPreferredMode(NULL);
+    if (CONF_GetAspectRatio() == CONF_ASPECT_16_9) {
+        rmode->viWidth = 678;
+    }
+    if (CONF_GetProgressiveScan() > 0 && VIDEO_HaveComponentCable()) {
+        rmode->viTVMode = VI_PROG;
+    }
+    VIDEO_Configure(rmode);
+
+    // Set callback for graceful exit via console power button
+    WPAD_SetPowerButtonCallback(PowerCallback);
 
     // Maximize available memory by expanding the heap into MEM2
     SYS_SetArena1Hi(SYS_GetArena1Lo());
@@ -23,6 +42,11 @@ int main(int argc, char** argv) {
         printf("FAT Init Failed! Please insert an SD Card.\n");
         return -1;
     }
+
+    // Create ISFS save directory if it doesn't exist
+    // 00010000 = standard games, 5242414C = 'RBAL' (Custom Title ID for Ballance)
+    ISFS_CreateDir("/title/00010000/5242414C", 0, 3, 3, 3);
+    ISFS_CreateDir("/title/00010000/5242414C/data", 0, 3, 3, 3);
 
     // Change the working directory to the standard homebrew path
     // This allows the engine to find the 'Textures' and 'Sounds' folders natively
@@ -41,8 +65,20 @@ int main(int argc, char** argv) {
         return -1;
     }
 
-    player.Run();
+    // Replace blocking player.Run() with a loop that checks for Home button exit
+    while (player.Update()) {
+#ifdef WII
+        WPAD_ScanPads();
+        if (WPAD_ButtonsDown(0) & WPAD_BUTTON_HOME) {
+            break; // Graceful exit back to Wii Menu / Homebrew Channel
+        }
+#endif
+    }
+
     player.Shutdown();
 
+#ifdef WII
+    ISFS_Deinitialize();
+#endif
     return 0;
 }
