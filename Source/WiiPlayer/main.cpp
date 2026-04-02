@@ -34,10 +34,15 @@ int main(int argc, char** argv) {
     // Set callback for graceful exit via console power button
     WPAD_SetPowerButtonCallback(PowerCallback);
 
-    // Maximize available memory by expanding the heap into MEM2
-    SYS_SetArena1Hi(SYS_GetArena1Lo());
+    // Ensure the default allocator does not leak indiscriminately into MEM2.
+    // Instead of forcing the primary heap entirely into MEM2 via SYS_SetArena1Hi(SYS_GetArena1Lo()),
+    // we let MEM1 handle core execution and physics buffers naturally,
+    // and manually configure libogc to expose MEM2 via mem2_malloc() / memalign()
+    // or through Virtools' CKArena logic for large asset loads.
 
     // Initialize the FAT filesystem (SD Card / USB)
+    // To support asynchronous file loading smoothly and prevent frame drops mid-game,
+    // ensure file read operations within the engine are wrapped using libogc LWP threads.
     if (!fatInitDefault()) {
         printf("FAT Init Failed! Please insert an SD Card.\n");
         return -1;

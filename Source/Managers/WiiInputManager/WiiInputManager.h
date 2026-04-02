@@ -53,6 +53,10 @@ public:
 
 private:
     CKBOOL m_CursorVisible;
+#ifdef WII
+    Vx2DVector m_LastCursorPos;
+    int m_LastExpType;
+#endif
 };
 
 #endif // WIIINPUTMANAGER_H

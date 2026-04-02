@@ -59,7 +59,9 @@ protected:
 
 private:
     CKBOOL m_Initialized;
-    int m_NextVoiceID;
+#ifdef WII
+    WiiSoundSource* m_ActiveVoices[16];
+#endif
 };
 
 #endif // WIISOUNDMANAGER_H

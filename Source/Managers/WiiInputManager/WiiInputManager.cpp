@@ -32,6 +32,10 @@ CKERROR RemoveWiiInputManager(CKContext* context, CKBaseManager* res) {
 
 WiiInputManager::WiiInputManager(CKContext* Context) : CKInputManager(Context, "WiiInputManager") {
     m_CursorVisible = FALSE;
+#ifdef WII
+    m_LastCursorPos.Set(320.0f, 240.0f);
+    m_LastExpType = -1;
+#endif
 }
 
 WiiInputManager::~WiiInputManager() {}
@@ -55,6 +59,22 @@ CKERROR WiiInputManager::OnCKEnd() {
 CKERROR WiiInputManager::PreProcess() {
 #ifdef WII
     WPAD_ScanPads();
+
+    // Poll for Wiimote disconnects
+    u32 probes[4];
+    WPAD_Probe(WPAD_CHAN_0, &probes[0]);
+    if (probes[0] == WPAD_ERR_NO_CONTROLLER) {
+        // Automatically trigger Virtools Pause if controller disconnects
+        m_Context->Pause();
+    } else {
+        // Detect hot-swapping
+        WPADData* data = WPAD_Data(WPAD_CHAN_0);
+        if (data && data->exp.type != m_LastExpType) {
+            // Expansion changed (e.g., Nunchuk plugged/unplugged)
+            m_LastExpType = data->exp.type;
+            // Additional callback or event triggering can be added here
+        }
+    }
 #endif
     return CK_OK;
 }
@@ -136,7 +156,7 @@ void WiiInputManager::GetMousePosition(Vx2DVector &oPosition, CKBOOL iAbsolute) 
 #ifdef WII
     WPADData* data = WPAD_Data(WPAD_CHAN_0);
     // Check if the IR camera sees the sensor bar
-    if (data->ir.valid) {
+    if (data && data->ir.valid) {
         // Map the raw IR coordinates (usually 1024x768 internal) to standard 640x480 screen space
         float mapX = (data->ir.x / 1024.0f) * 640.0f;
         float mapY = (data->ir.y / 768.0f) * 480.0f;
@@ -147,8 +167,17 @@ void WiiInputManager::GetMousePosition(Vx2DVector &oPosition, CKBOOL iAbsolute) 
         if (mapY < 0.0f) mapY = 0.0f;
         if (mapY > 480.0f) mapY = 480.0f;
 
-        oPosition.x = mapX;
-        oPosition.y = mapY;
+        // Exponential moving average filter to smooth IR jitter
+        const float alpha = 0.3f; // Smoothing factor (lower = smoother but more lag)
+        m_LastCursorPos.x = m_LastCursorPos.x + alpha * (mapX - m_LastCursorPos.x);
+        m_LastCursorPos.y = m_LastCursorPos.y + alpha * (mapY - m_LastCursorPos.y);
+
+        oPosition.x = m_LastCursorPos.x;
+        oPosition.y = m_LastCursorPos.y;
+    } else {
+        // If IR is lost, maintain the last known good position
+        oPosition.x = m_LastCursorPos.x;
+        oPosition.y = m_LastCursorPos.y;
     }
 #endif
 }
