@@ -39,6 +39,8 @@ protected:
     u8 m_DestBlend;
 
     u8 m_CullMode;
+    u8 m_AlphaFunc;
+    u8 m_AlphaRef;
 #endif
 
 public:

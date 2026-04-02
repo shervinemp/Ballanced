@@ -13,7 +13,9 @@ CKERROR RemoveWiiSoundManager(CKContext* context, CKBaseManager* res) {
 
 WiiSoundManager::WiiSoundManager(CKContext* Context) : CKSoundManager(Context, "WiiSoundManager") {
     m_Initialized = FALSE;
-    m_NextVoiceID = 0;
+#ifdef WII
+    memset(m_ActiveVoices, 0, sizeof(m_ActiveVoices));
+#endif
 }
 
 WiiSoundManager::~WiiSoundManager() {}
@@ -180,18 +182,28 @@ void WiiSoundManager::Update3DSettings(void *source, CK_SOUNDMANAGER_CAPS settin
     // Extract sound position
     VxVector soundPos = settings.m_Position;
 
-    // We need the listener position. For now, since CKListenerSettings doesn't contain a position
-    // and querying the active camera from CKRenderContext is complex, we will assume a stationary listener at origin
-    // or you could hook into a global updated by the game logic.
-    extern VxVector g_ListenerPos;
-    extern VxVector g_ListenerRight; // For panning
+    // Dynamically fetch the listener position and orientation from the active camera
+    VxVector listenerPos(0.0f, 0.0f, 0.0f);
+    VxVector listenerRight(1.0f, 0.0f, 0.0f);
+
+    CKRenderManager* rm = m_Context->GetRenderManager();
+    if (rm && rm->GetRenderContextCount() > 0) {
+        CKRenderContext* rc = rm->GetRenderContext(0);
+        if (rc) {
+            CKCamera* cam = rc->GetAttachedCamera();
+            if (cam) {
+                cam->GetPosition(&listenerPos, NULL);
+                VxVector dir, up;
+                cam->GetOrientation(&dir, &up, &listenerRight, NULL);
+            }
+        }
+    }
 
     // Calculate distance
-    VxVector diff = soundPos - g_ListenerPos;
+    VxVector diff = soundPos - listenerPos;
     float dist = diff.Magnitude();
 
-    // Calculate volume attenuation (simple linear fallback)
-    // You can use settings.m_MinDistance and settings.m_MaxDistance for a proper curve
+    // Calculate volume attenuation using a logarithmic distance curve
     float minD = settings.m_MinDistance > 0.1f ? settings.m_MinDistance : 1.0f;
     float maxD = settings.m_MaxDistance > minD ? settings.m_MaxDistance : 1000.0f;
 
@@ -200,8 +212,15 @@ void WiiSoundManager::Update3DSettings(void *source, CK_SOUNDMANAGER_CAPS settin
         if (dist >= maxD) {
             volScale = 0.0f;
         } else {
-            // Linear attenuation between min and max
-            volScale = 1.0f - ((dist - minD) / (maxD - minD));
+            // Inverse distance (logarithmic-style attenuation)
+            // Roll-off factor models real-world physics
+            float rolloff = 1.0f;
+            volScale = minD / (minD + rolloff * (dist - minD));
+
+            // Clamp to 0.0 at max distance to fully mute distant objects
+            float maxVolScale = minD / (minD + rolloff * (maxD - minD));
+            volScale = (volScale - maxVolScale) / (1.0f - maxVolScale);
+            if (volScale < 0.0f) volScale = 0.0f;
         }
     }
 
@@ -213,7 +232,7 @@ void WiiSoundManager::Update3DSettings(void *source, CK_SOUNDMANAGER_CAPS settin
     float dotRight = 0.0f; // Center default
     if (dist > 0.001f) {
         VxVector dir = diff / dist;
-        dotRight = DotProduct(dir, g_ListenerRight); // Range [-1.0, 1.0]
+        dotRight = DotProduct(dir, listenerRight); // Range [-1.0, 1.0]
     }
 
     // Convert pan to left/right volume balance
@@ -234,18 +253,7 @@ void WiiSoundManager::Update3DSettings(void *source, CK_SOUNDMANAGER_CAPS settin
 #endif
 }
 
-#ifdef WII
-VxVector g_ListenerPos(0.0f, 0.0f, 0.0f);
-VxVector g_ListenerRight(1.0f, 0.0f, 0.0f);
-#endif
-
 void WiiSoundManager::UpdateListenerSettings(CK_SOUNDMANAGER_CAPS settingsoptions, CKListenerSettings &settings, CKBOOL set) {
-#ifdef WII
-    // CKListenerSettings does not contain global listener coordinates.
-    // In a real Virtools engine setup, the listener position is updated directly
-    // from the active camera (e.g., GetRenderContext()->GetAttachedCamera()).
-    // We would fetch and store g_ListenerPos and g_ListenerRight here.
-#endif
 }
 CKBOOL WiiSoundManager::IsInitialized() { return m_Initialized; }
 
@@ -254,8 +262,11 @@ void WiiSoundManager::InternalPause(void *source) {
     WiiSoundSource* src = (WiiSoundSource*)source;
     src->is_playing = FALSE;
 #ifdef WII
-    if (src->voice_id >= 0) {
-        ASND_StopVoice(src->voice_id);
+    if (src->voice_id >= 0 && src->voice_id < 16) {
+        if (m_ActiveVoices[src->voice_id] == src) {
+            ASND_StopVoice(src->voice_id);
+            m_ActiveVoices[src->voice_id] = NULL;
+        }
         src->voice_id = -1;
     }
 #endif
@@ -270,10 +281,37 @@ void WiiSoundManager::InternalPlay(void *source, CKBOOL loop) {
 #ifdef WII
     DCFlushRange(src->pcm_data, src->byte_size);
 
-    src->voice_id = m_NextVoiceID++;
-    if (m_NextVoiceID > 15) m_NextVoiceID = 0;
+    // Hardware voice management: Priority Queue
+    // Find an empty voice slot first
+    int assigned_voice = -1;
+    for (int i = 0; i < 16; i++) {
+        if (!m_ActiveVoices[i] || ASND_StatusVoice(i) == SND_UNUSED) {
+            assigned_voice = i;
+            break;
+        }
+    }
 
-    ASND_StopVoice(src->voice_id);
+    // If no empty slot, cull the quietest sound
+    if (assigned_voice == -1) {
+        int lowest_vol = 256;
+        int target_cull = 0;
+        for (int i = 0; i < 16; i++) {
+            if (m_ActiveVoices[i] && m_ActiveVoices[i]->volume < lowest_vol) {
+                lowest_vol = m_ActiveVoices[i]->volume;
+                target_cull = i;
+            }
+        }
+        // Force stop the culled voice
+        ASND_StopVoice(target_cull);
+        if (m_ActiveVoices[target_cull]) {
+            m_ActiveVoices[target_cull]->voice_id = -1;
+            m_ActiveVoices[target_cull]->is_playing = FALSE;
+        }
+        assigned_voice = target_cull;
+    }
+
+    src->voice_id = assigned_voice;
+    m_ActiveVoices[assigned_voice] = src;
 
     int format = VOICE_STEREO_16BIT;
     if (src->format.nChannels == 1) {

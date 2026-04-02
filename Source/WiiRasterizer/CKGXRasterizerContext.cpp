@@ -14,6 +14,8 @@ CKGXRasterizerContext::CKGXRasterizerContext() {
     m_SrcBlend = GX_BL_SRCALPHA;
     m_DestBlend = GX_BL_INVSRCALPHA;
     m_CullMode = GX_CULL_NONE;
+    m_AlphaFunc = GX_ALWAYS;
+    m_AlphaRef = 0;
 #endif
 }
 CKGXRasterizerContext::~CKGXRasterizerContext() {}
@@ -86,8 +88,10 @@ CKBOOL CKGXRasterizerContext::SetTexture(CKDWORD Texture, CKDWORD Stage) {
     CKTextureDesc* desc = m_Owner->GetTextureDesc(Texture);
     if (!desc || !desc->Flags) {
         // Disable texturing for this stage (draw flat color)
-        GX_SetNumTexGens(0);
-        GX_SetTevOp(GX_TEVSTAGE0, GX_PASSCLR); // Pass vertex color directly
+        if (Stage == 0) {
+            GX_SetNumTexGens(0);
+            GX_SetTevOp(GX_TEVSTAGE0, GX_PASSCLR); // Pass vertex color directly
+        }
         return TRUE;
     }
 
@@ -107,7 +111,6 @@ CKBOOL CKGXRasterizerContext::SetTexture(CKDWORD Texture, CKDWORD Stage) {
     GX_LoadTexObj(texObj, texMap);
 
     // Tell the GPU we are using N texture generations and N TEV stages
-    // This is simplistic and assumes stages are set sequentially
     GX_SetNumTexGens(Stage + 1);
     GX_SetNumTevStages(Stage + 1);
 
@@ -118,11 +121,40 @@ CKBOOL CKGXRasterizerContext::SetTexture(CKDWORD Texture, CKDWORD Stage) {
     GX_SetTexCoordGen(texCoord, GX_TG_MTX2x4, GX_TG_TEX0 + Stage, GX_IDENTITY);
 
     // TEV Stage Configuration
-    // If it's the first stage, use rasterized color (vertex color).
-    // For multi-texturing (Stage > 0), blend with the previous TEV output.
-    u32 colorIn = (Stage == 0) ? GX_COLOR0A0 : GX_COLORPREV;
-    GX_SetTevOrder(tevStage, texCoord, texMap, colorIn);
-    GX_SetTevOp(tevStage, GX_MODULATE);
+    u32 colorIn = (Stage == 0) ? GX_CC_RASC : GX_CC_CPREV;
+    u32 alphaIn = (Stage == 0) ? GX_CA_RASA : GX_CA_APREV;
+
+    GX_SetTevOrder(tevStage, texCoord, texMap, GX_COLOR0A0);
+
+    // Map Virtools blend operations:
+    // desc->TextureBlendMode determines the exact TEV operation.
+    // Assuming standard VXTEXTUREBLENDMODE constants:
+    // VXTEXTUREBLEND_DECAL (replace), VXTEXTUREBLEND_MODULATE (multiply), VXTEXTUREBLEND_ADD (add)
+    u8 blendMode = desc->TextureBlendMode;
+
+    switch (blendMode) {
+        case 2: // VXTEXTUREBLEND_DECAL (Replace)
+            GX_SetTevColorIn(tevStage, GX_CC_ZERO, GX_CC_ZERO, GX_CC_ZERO, GX_CC_TEXC);
+            GX_SetTevAlphaIn(tevStage, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_TEXA);
+            GX_SetTevColorOp(tevStage, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+            GX_SetTevAlphaOp(tevStage, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+            break;
+        case 3: // VXTEXTUREBLEND_ADD
+            // C = (ColorIn * 1) + TexColor
+            GX_SetTevColorIn(tevStage, colorIn, GX_CC_ZERO, GX_CC_ZERO, GX_CC_TEXC);
+            GX_SetTevAlphaIn(tevStage, alphaIn, GX_CA_ZERO, GX_CA_ZERO, GX_CA_TEXA);
+            GX_SetTevColorOp(tevStage, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+            GX_SetTevAlphaOp(tevStage, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+            break;
+        case 1: // VXTEXTUREBLEND_MODULATE
+        default:
+            // C = (ColorIn * TexColor)
+            GX_SetTevColorIn(tevStage, GX_CC_ZERO, GX_CC_TEXC, colorIn, GX_CC_ZERO);
+            GX_SetTevAlphaIn(tevStage, GX_CA_ZERO, GX_CA_TEXA, alphaIn, GX_CA_ZERO);
+            GX_SetTevColorOp(tevStage, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+            GX_SetTevAlphaOp(tevStage, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+            break;
+    }
 #endif
     return TRUE;
 }
@@ -179,6 +211,28 @@ CKBOOL CKGXRasterizerContext::SetRenderState(VXRENDERSTATETYPE State, CKDWORD Va
             GX_SetCullMode(m_CullMode);
             break;
         }
+        case VXRENDERSTATE_ALPHATESTENABLE:
+            if (Value) {
+                // Enable alpha test with threshold > 0 (common for standard transparency)
+                GX_SetAlphaCompare(GX_GREATER, 0, GX_AOP_AND, GX_ALWAYS, 0);
+            } else {
+                // Disable alpha test by always passing
+                GX_SetAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0);
+            }
+            break;
+        case VXRENDERSTATE_ALPHAREF:
+            m_AlphaRef = (u8)(Value & 0xFF);
+            GX_SetAlphaCompare(m_AlphaFunc, m_AlphaRef, GX_AOP_AND, GX_ALWAYS, 0);
+            break;
+        case VXRENDERSTATE_ALPHAFUNC: {
+            static const u8 cmpFuncs[] = {
+                GX_NEVER, GX_NEVER, GX_LESS, GX_EQUAL,
+                GX_LEQUAL, GX_GREATER, GX_NEQUALS, GX_GEQUAL, GX_ALWAYS
+            };
+            if (Value <= 8) m_AlphaFunc = cmpFuncs[Value];
+            GX_SetAlphaCompare(m_AlphaFunc, m_AlphaRef, GX_AOP_AND, GX_ALWAYS, 0);
+            break;
+        }
         default:
             break;
     }
@@ -190,8 +244,18 @@ CKBOOL CKGXRasterizerContext::DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indic
 #ifdef WII
     if (!data || !data->PositionPtr || indexcount <= 0) return FALSE;
 
-    // We assume triangles for now based on the requested mapping
-    GX_Begin(GX_TRIANGLES, GX_VTXFMT0, indexcount);
+    u8 gxPrimType = GX_TRIANGLES;
+    switch (pType) {
+        case VX_TRISTRIP: gxPrimType = GX_TRIANGLESTRIP; break;
+        case VX_TRIFAN:   gxPrimType = GX_TRIANGLEFAN; break;
+        case VX_LINELIST: gxPrimType = GX_LINES; break;
+        case VX_LINESTRIP:gxPrimType = GX_LINESTRIP; break;
+        case VX_POINTS:   gxPrimType = GX_POINTS; break;
+        case VX_TRIANGLES:
+        default:          gxPrimType = GX_TRIANGLES; break;
+    }
+
+    GX_Begin(gxPrimType, GX_VTXFMT0, indexcount);
 
     CKBYTE* posPtr = (CKBYTE*)data->PositionPtr;
     CKBYTE* normPtr = (CKBYTE*)data->NormalPtr;
