@@ -78,3 +78,8 @@ endforeach ()
 if (NOT WIN32)
     ballance_set_cache_default(CKBB_BUILD_MidiManager OFF BOOL "")
 endif ()
+
+if (WII)
+    # SDL GPU has no Wii backend; the GX rasterizer is built from Source/WiiRasterizer.
+    ballance_set_cache_default(CKRE_BUILD_SDL_GPU_RASTERIZER OFF BOOL "")
+endif ()

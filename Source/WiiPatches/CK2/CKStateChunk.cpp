@@ -3209,6 +3209,7 @@ int CKStateChunk::ManagerRemapper(ChunkIteratorData *it) {
                             ++total;
                         }
                     }
+#endif
                 }
             }
         }

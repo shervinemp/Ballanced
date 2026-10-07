@@ -46,20 +46,27 @@ option(CKMANAGERS_BUILD_SDLSOUND "Build SdlSoundManager" ON)
 option(CKMANAGERS_BUILD_PARAMETEROPERATIONS "Build ParameterOperations" ON)
 set(BALLANCE_TARGET_ARCH "" CACHE STRING "Optional target architecture label used by platform presets")
 
-if (NOT TARGET SDL3::SDL3)
-    find_package(SDL3 CONFIG REQUIRED)
-endif ()
-
 set(CKMANAGERS_COMPONENTS "")
 
-if (CKMANAGERS_BUILD_ALL OR CKMANAGERS_BUILD_SDLINPUT)
-    add_subdirectory(SdlInputManager)
-    list(APPEND CKMANAGERS_COMPONENTS SdlInputManager)
-endif ()
+if (WII)
+    # libogc-based managers replace the SDL3 ones on the Wii.
+    add_subdirectory(WiiInputManager)
+    add_subdirectory(WiiSoundManager)
+    list(APPEND CKMANAGERS_COMPONENTS WiiInputManager WiiSoundManager)
+else ()
+    if (NOT TARGET SDL3::SDL3)
+        find_package(SDL3 CONFIG REQUIRED)
+    endif ()
 
-if (CKMANAGERS_BUILD_ALL OR CKMANAGERS_BUILD_SDLSOUND)
-    add_subdirectory(SdlSoundManager)
-    list(APPEND CKMANAGERS_COMPONENTS SdlSoundManager)
+    if (CKMANAGERS_BUILD_ALL OR CKMANAGERS_BUILD_SDLINPUT)
+        add_subdirectory(SdlInputManager)
+        list(APPEND CKMANAGERS_COMPONENTS SdlInputManager)
+    endif ()
+
+    if (CKMANAGERS_BUILD_ALL OR CKMANAGERS_BUILD_SDLSOUND)
+        add_subdirectory(SdlSoundManager)
+        list(APPEND CKMANAGERS_COMPONENTS SdlSoundManager)
+    endif ()
 endif ()
 
 if (CKMANAGERS_BUILD_ALL OR CKMANAGERS_BUILD_PARAMETEROPERATIONS)

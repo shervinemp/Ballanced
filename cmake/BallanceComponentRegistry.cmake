@@ -19,12 +19,21 @@ else ()
 endif ()
 set(BALLANCE_RENDER_ENGINE_RUNTIME_OUTPUTS ${BALLANCE_RENDER_ENGINE_RUNTIME_TARGETS})
 
-set(BALLANCE_MANAGER_RUNTIME_TARGETS
-        SdlInputManager SdlSoundManager ParameterOperations
-)
-set(BALLANCE_MANAGER_RUNTIME_OUTPUTS
-        SdlInputManager SdlSoundManager ParameterOperations
-)
+if (WII)
+    set(BALLANCE_MANAGER_RUNTIME_TARGETS
+            WiiInputManager WiiSoundManager ParameterOperations
+    )
+    set(BALLANCE_MANAGER_RUNTIME_OUTPUTS
+            WiiInputManager WiiSoundManager ParameterOperations
+    )
+else ()
+    set(BALLANCE_MANAGER_RUNTIME_TARGETS
+            SdlInputManager SdlSoundManager ParameterOperations
+    )
+    set(BALLANCE_MANAGER_RUNTIME_OUTPUTS
+            SdlInputManager SdlSoundManager ParameterOperations
+    )
+endif ()
 
 set(BALLANCE_PLUGIN_RUNTIME_TARGETS
         AVIReader ImageReader WavReader VirtoolsLoader
@@ -55,6 +64,10 @@ set(BALLANCE_MODULE_RUNTIME_TARGETS
         ${BALLANCE_PLUGIN_RUNTIME_TARGETS}
         ${BALLANCE_BUILDING_BLOCK_RUNTIME_TARGETS}
 )
+if (WII)
+    # The GX rasterizer lives outside the RenderEngine submodule.
+    list(APPEND BALLANCE_MODULE_RUNTIME_TARGETS CKGXRasterizer)
+endif ()
 
 if (WII)
     set(_ballance_player_target WiiPlayer)
