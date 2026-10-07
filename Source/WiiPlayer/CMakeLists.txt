@@ -110,6 +110,18 @@ add_custom_command(TARGET WiiPlayer POST_BUILD
 
 # On-console tests (tests.dol): state chunk and file byte layouts, media
 # readers and GX rasterizer pixels. Run from the SD card or in Dolphin.
+
+# The font suite installs the Roboto font from the Interface tests (Apache
+# License 2.0), embedded as a C array; configure_file only rewrites it when
+# the bytes change.
+set(_test_font "${CMAKE_SOURCE_DIR}/Source/BuildingBlocks/Interface/tests/fonts/roboto-regular.ttf")
+file(READ "${_test_font}" _test_font_hex HEX)
+string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," _test_font_hex "${_test_font_hex}")
+file(WRITE "${_generated}/TestFont.c.in"
+        "const unsigned char kTestFont[] = {${_test_font_hex}};\n"
+        "const unsigned int kTestFontSize = sizeof(kTestFont);\n")
+configure_file("${_generated}/TestFont.c.in" "${_generated}/TestFont.c" COPYONLY)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_test_font}")
 add_executable(WiiPlayerTests
         tests/main.cpp
         tests/TestFramework.cpp
@@ -122,13 +134,16 @@ add_executable(WiiPlayerTests
         tests/SoundTests.cpp
         tests/DemoComposition.cpp
         tests/PhysicsTests.cpp
+        tests/FontTests.cpp
+        "${_generated}/TestFont.c"
         "${_player_src}/StaticPlugins.cpp"
 )
 target_compile_features(WiiPlayerTests PRIVATE cxx_std_17)
 target_compile_definitions(WiiPlayerTests PRIVATE BALLANCE_STATIC_MODULES ${_static_definitions})
-# The physics suite drives physics_RT's manager directly, like its own tests.
+# The physics and font suites drive their managers directly, like their own tests.
 target_include_directories(WiiPlayerTests PRIVATE "${_player_src}" "${_generated}"
-        "${CMAKE_SOURCE_DIR}/Source/BuildingBlocks/physics_RT")
+        "${CMAKE_SOURCE_DIR}/Source/BuildingBlocks/physics_RT"
+        "${CMAKE_SOURCE_DIR}/Source/BuildingBlocks/Interface")
 target_link_libraries(WiiPlayerTests PRIVATE ${_static_targets} CKGXRasterizer CK2 VxMath WiiSystem ivp_controller)
 set_target_properties(WiiPlayerTests PROPERTIES OUTPUT_NAME tests SUFFIX ".elf")
 ogc_create_dol(WiiPlayerTests)

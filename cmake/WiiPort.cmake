@@ -301,6 +301,13 @@ function(ballance_wii_port_building_blocks)
                   TT_Toolbox_RT/Behaviors/HighMapMeshform.cpp
             TARGETS InterfaceStatic TT_DatabaseManager_RTStatic TT_Toolbox_RTStatic
     )
+    # No system fonts: TrueType fonts are looked up in a Fonts folder next to the game.
+    ballance_wii_patch(InterfaceFonts
+            ROOT "${_root}"
+            PATCH "${BALLANCE_WII_PATCH_DIR}/BuildingBlocks/wii-fonts.patch"
+            FILES Interface/CKStbFontBackend.cpp
+            TARGETS InterfaceStatic
+    )
 endfunction()
 
 # Code generation settings for every target in the tree:

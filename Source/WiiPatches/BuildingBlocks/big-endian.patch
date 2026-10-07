@@ -1,8 +1,30 @@
 diff --git a/Interface/CKFontManager.cpp b/Interface/CKFontManager.cpp
-index f8637f1..fc77a48 100644
+index f8637f1..e78ef49 100644
 --- a/Interface/CKFontManager.cpp
 +++ b/Interface/CKFontManager.cpp
-@@ -1017,9 +1017,9 @@ CKStateChunk *CKFontManager::SaveData(CKFile *SavedFile)
+@@ -185,12 +185,16 @@ static void PutFontAlphaPixel(VxImageDescEx &desc, int x, int y, CKBYTE alpha)
+     if (x < 0 || y < 0 || x >= desc.Width || y >= desc.Height || alpha == 0)
+         return;
+ 
++    // A white texel whose alpha is the glyph coverage; texels are
++    // host-order ARGB words.
+     CKBYTE *pixel = FontTexturePixel(desc, x, y);
+-    pixel[0] = 0xff;
+-    pixel[1] = 0xff;
+-    pixel[2] = 0xff;
+-    if (alpha > pixel[3])
+-        pixel[3] = alpha;
++    CKDWORD value;
++    memcpy(&value, pixel, sizeof(value));
++    CKDWORD coverage = value >> 24;
++    if (alpha > coverage)
++        coverage = alpha;
++    value = (coverage << 24) | 0x00FFFFFF;
++    memcpy(pixel, &value, sizeof(value));
+ }
+ 
+ static void RenderStbFontAtlas(StbFontHandle *handle,
+@@ -1017,9 +1021,9 @@ CKStateChunk *CKFontManager::SaveData(CKFile *SavedFile)
  		// FontName
  		chunk->WriteString(font->m_FontName);
  		// CharNumber

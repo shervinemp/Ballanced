@@ -1,0 +1,30 @@
+diff --git a/Interface/CKStbFontBackend.cpp b/Interface/CKStbFontBackend.cpp
+index 79bc69b..5ac73a0 100644
+--- a/Interface/CKStbFontBackend.cpp
++++ b/Interface/CKStbFontBackend.cpp
+@@ -4,6 +4,9 @@
+ #include "CKStbFontBackend.h"
+ 
+ #include "VxWindowFunctions.h"
++#if defined(GEKKO)
++#include "VxWiiPlatform.h"
++#endif
+ 
+ #include <ctype.h>
+ #include <stdio.h>
+@@ -479,6 +482,15 @@ void CKStbDefaultFontDirectories(XClassArray<XString> &directories)
+ {
+     directories.Clear();
+ 
++#if defined(GEKKO)
++    // The Wii has no system fonts: TrueType fonts go in a Fonts folder next
++    // to the game.
++    XString wiiFonts(VxWiiGetApplicationPath());
++    wiiFonts << "Fonts";
++    AddDirectory(directories, wiiFonts);
++    return;
++#endif
++
+ #if defined(__APPLE__)
+     AddDirectory(directories, XString("/System/Library/Fonts"));
+     AddDirectory(directories, XString("/System/Library/Fonts/Supplemental"));

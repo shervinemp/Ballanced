@@ -69,6 +69,7 @@ int main(int argc, char **argv)
     {
         RunFileTests(context);
         RunSoundTests(context);
+        RunFontTests(context);
     }
     else
     {
