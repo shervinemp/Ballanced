@@ -334,7 +334,7 @@ Start it from the Homebrew Channel. The game runs from the folder `boot.dol` was
 
 ### On-console tests
 
-`tests.dol` checks state chunk and file byte layouts, media readers and writers, sound playback, fonts, GX rasterizer output, physics and a render engine scene, and writes a small demo composition to `sd:/apps/ballance-demo/base.cmo`. Copy it to `apps/wiitests/boot.dol` and start it; results appear on screen and in `sd:/wiitests.log`. In Dolphin, enable SD card folder sync and, under Graphics > Hacks, turn off "Skip EFB Access from CPU" and "Store EFB Copies to Texture Only" so the rasterizer checks can read the frame back.
+`tests.dol` checks state chunk and file byte layouts, media readers and writers, sound playback, fonts, GX rasterizer output, physics and a render engine scene, and writes a small demo composition to `sd:/apps/ballance-demo/base.cmo`. Copy it to `apps/wiitests/boot.dol` and start it; results appear on screen and in `sd:/wiitests.log`. In Dolphin, enable SD card folder sync and, under Graphics > Hacks, turn off "Skip EFB Access from CPU" and "Store EFB Copies to Texture Only" so the rasterizer checks can read the frame back. Turning on MMU emulation (Config > Advanced) makes invalid memory accesses fault as they would on a console instead of reading zeros.
 
 ## Troubleshooting
 
