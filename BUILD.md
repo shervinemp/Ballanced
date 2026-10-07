@@ -357,6 +357,14 @@ Every half minute `Player.log` records the frame rate, how each frame splits bet
 
 `tests.dol` checks the memory available to the game, state chunk and file byte layouts, media readers and writers, sound playback, fonts, the game database, GX rasterizer output and the system screens drawn over it, building blocks, the on-screen keyboard, physics and a render engine scene, and writes a small demo composition to `sd:/apps/ballance-demo/base.cmo`. Copy it to `apps/wiitests/boot.dol` and start it; results appear on screen and in `sd:/wiitests.log`. In Dolphin, enable SD card folder sync and, under Graphics > Hacks, turn off "Skip EFB Access from CPU" and "Store EFB Copies to Texture Only" so the rasterizer checks can read the frame back. Turning on MMU emulation (Config > Advanced) makes invalid memory accesses fault as they would on a console instead of reading zeros.
 
+### When something goes wrong on the console
+
+`Player.log` next to `boot.dol` records loading errors (for example missing plugin GUIDs) and the periodic frame time and memory figures. If the console stops on an exception screen, note the addresses in the stack trace and look them up in the matching build:
+
+```bash
+powerpc-eabi-addr2line -f -C -e build/wii/Source/WiiPlayer/boot.elf 0x80123456
+```
+
 ## Troubleshooting
 
 ### `stage` fails after CMake file changes
