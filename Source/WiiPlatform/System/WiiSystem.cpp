@@ -252,72 +252,264 @@ namespace wiisystem
         return requested;
     }
 
-    QuitAction ShowHomeMenu()
+    // ------------------------------------------------------------------
+    // HOME menu
+
+    namespace
     {
-        GXRModeObj *mode = g_VideoMode ? g_VideoMode : VIDEO_GetPreferredMode(NULL);
-        static void *s_MenuFrameBuffer = NULL;
-        if (!s_MenuFrameBuffer)
-            s_MenuFrameBuffer = MEM_K0_TO_K1(SYS_AllocateFramebuffer(mode));
-
-        console_init(s_MenuFrameBuffer, 20, 20, mode->fbWidth, mode->xfbHeight,
-                     mode->fbWidth * VI_DISPLAY_PIX_SZ);
-        VIDEO_SetNextFramebuffer(s_MenuFrameBuffer);
-        VIDEO_Flush();
-
-        printf("\x1b[2J\x1b[4;0H");
-        printf("        HOME Menu\n\n\n");
-        printf("        A / HOME    Return to the game\n\n");
-        printf("        +           Exit to the Homebrew Channel\n\n");
-        printf("        -           Exit to the Wii Menu\n");
-
-        // Let go of HOME before reading the choice.
-        for (int frame = 0; frame < 15; ++frame)
+        enum HomeButton
         {
-            ScanControllers();
-            VIDEO_WaitVSync();
+            HOME_CLOSE,
+            HOME_LOADER,
+            HOME_WII_MENU,
+            HOME_YES,
+            HOME_NO,
+            HOME_BUTTON_COUNT
+        };
+
+        enum HomeState
+        {
+            HOME_CLOSED,
+            HOME_MAIN,
+            HOME_CONFIRM,
+            HOME_LEAVING // Closed; waits for the buttons to be let go
+        };
+
+        struct HomeMenu
+        {
+            HomeState State;
+            int Focus;
+            QuitAction Pending;
+            int LeavingFrames;
+        };
+
+        HomeMenu g_Home = {HOME_CLOSED, HOME_LOADER, QUIT_NONE, 0};
+
+        const u32 kDim = 0x000000A0;
+        const u32 kBar = 0x2A2E36F0;
+        const u32 kBarText = 0xFFFFFFFF;
+        const u32 kButtonFill = 0xF4F6F8FF;
+        const u32 kButtonBorder = 0xA8B0BCFF;
+        const u32 kButtonText = 0x283038FF;
+        const u32 kFocusFill = 0xD6F1FCFF;
+        const u32 kFocusBorder = 0x2FB4E8FF;
+        const u32 kDialogFill = 0xEEF1F4F8;
+        const u32 kBatteryFull = 0x6CC24AFF;
+        const u32 kBatteryEmpty = 0x50555EFF;
+        const u32 kAbsent = 0x60656EFF;
+
+        struct Box
+        {
+            float X0, Y0, X1, Y1;
+        };
+
+        Box HomeButtonBox(int button)
+        {
+            static const Box kBoxes[HOME_BUTTON_COUNT] = {
+                {520.0f, 12.0f, 628.0f, 52.0f},   // Close
+                {36.0f, 196.0f, 308.0f, 268.0f},  // Homebrew Channel
+                {332.0f, 196.0f, 604.0f, 268.0f}, // Wii Menu
+                {150.0f, 262.0f, 310.0f, 310.0f}, // Yes
+                {330.0f, 262.0f, 490.0f, 310.0f}, // No
+            };
+            return kBoxes[button];
         }
 
-        QuitAction choice = QUIT_NONE;
-        while (g_QuitRequest == QUIT_NONE)
+        bool HomeButtonActive(int button)
         {
-            ScanControllers();
-            u32 wiiButtons = 0;
-            u32 padButtons = 0;
+            if (g_Home.State == HOME_CONFIRM)
+                return button == HOME_YES || button == HOME_NO;
+            return button == HOME_CLOSE || button == HOME_LOADER || button == HOME_WII_MENU;
+        }
+
+        int HomeButtonAt(float x, float y)
+        {
+            for (int button = 0; button < HOME_BUTTON_COUNT; ++button)
+            {
+                const Box box = HomeButtonBox(button);
+                if (HomeButtonActive(button) && x >= box.X0 && x < box.X1 && y >= box.Y0 && y < box.Y1)
+                    return button;
+            }
+            return -1;
+        }
+
+        // D-Pad focus: Close sits above the two exits, Yes and No side by side.
+        int HomeMove(int focus, int dx, int dy)
+        {
+            if (g_Home.State == HOME_CONFIRM)
+                return dx < 0 ? HOME_YES : (dx > 0 ? HOME_NO : focus);
+            if (dy < 0)
+                return HOME_CLOSE;
+            if (dy > 0 && focus == HOME_CLOSE)
+                return HOME_WII_MENU;
+            if (dx < 0 && focus != HOME_CLOSE)
+                return HOME_LOADER;
+            if (dx > 0 && focus != HOME_CLOSE)
+                return HOME_WII_MENU;
+            return focus;
+        }
+
+        OverlayItem HomeButtonItem(int button, const char *label, float scale)
+        {
+            const Box box = HomeButtonBox(button);
+            const bool focused = g_Home.Focus == button;
+            return MakeOverlayItem(box.X0, box.Y0, box.X1, box.Y1, focused ? kFocusFill : kButtonFill,
+                                   focused ? kFocusBorder : kButtonBorder, label, kButtonText, scale);
+        }
+
+        void PublishHomeMenu()
+        {
+            OverlayItem items[48];
+            int count = 0;
+            items[count++] = MakeOverlayItem(0, 0, 640, 480, kDim, 0);
+            items[count++] = MakeOverlayItem(0, 0, 640, 64, kBar, 0, "HOME Menu", kBarText, 2.0f);
+            items[count++] = HomeButtonItem(HOME_CLOSE, "Close", 1.0f);
+            items[count++] = HomeButtonItem(HOME_LOADER, "Homebrew Channel", 2.0f);
+            items[count++] = HomeButtonItem(HOME_WII_MENU, "Wii Menu", 2.0f);
+
+            // Wii Remote batteries, four bars each.
+            items[count++] = MakeOverlayItem(0, 400, 640, 480, kBar, 0);
             for (int chan = 0; chan < 4; ++chan)
             {
-                wiiButtons |= WPAD_ButtonsDown(chan);
-                padButtons |= PAD_ButtonsDown(chan);
+                u32 type;
+                const bool connected = WPAD_Probe(chan, &type) == WPAD_ERR_NONE;
+                const float x = 64.0f + chan * 144.0f;
+                char label[4] = {'P', (char)('1' + chan), '\0', '\0'};
+                items[count++] = MakeOverlayItem(x, 424, x + 32, 456, 0, 0, label, connected ? kBarText : kAbsent);
+                const int level = connected ? WPAD_BatteryLevel(chan) : 0;
+                int bars = (level + 51) / 52;
+                if (bars > 4)
+                    bars = 4;
+                for (int i = 0; i < 4; ++i)
+                {
+                    const float cx = x + 40.0f + i * 18.0f;
+                    items[count++] = MakeOverlayItem(cx, 430, cx + 14, 450,
+                                                     !connected ? 0 : (i < bars ? kBatteryFull : kBatteryEmpty),
+                                                     connected ? 0 : kAbsent);
+                }
             }
-            if (wiiButtons & (WPAD_BUTTON_A | WPAD_BUTTON_HOME | WPAD_CLASSIC_BUTTON_A | WPAD_CLASSIC_BUTTON_HOME) ||
-                padButtons & (PAD_BUTTON_A | PAD_BUTTON_START))
-                break;
-            if (wiiButtons & (WPAD_BUTTON_PLUS | WPAD_CLASSIC_BUTTON_PLUS) || padButtons & PAD_BUTTON_X)
-            {
-                choice = QUIT_TO_LOADER;
-                break;
-            }
-            if (wiiButtons & (WPAD_BUTTON_MINUS | WPAD_CLASSIC_BUTTON_MINUS) || padButtons & PAD_BUTTON_Y)
-            {
-                choice = QUIT_TO_MENU;
-                break;
-            }
-            VIDEO_WaitVSync();
-        }
 
-        if (choice != QUIT_NONE)
-            RequestQuit(choice);
+            if (g_Home.State == HOME_CONFIRM)
+            {
+                items[count++] = MakeOverlayItem(110, 150, 530, 330, kDialogFill, kButtonBorder);
+                items[count++] = MakeOverlayItem(110, 168, 530, 200, 0, 0,
+                                                 g_Home.Pending == QUIT_TO_MENU ? "Return to the Wii Menu?"
+                                                                                : "Exit to the Homebrew Channel?",
+                                                 kButtonText, 1.0f);
+                items[count++] = MakeOverlayItem(110, 204, 530, 236, 0, 0, "Unsaved progress will be lost.",
+                                                 kButtonText, 1.0f);
+                items[count++] = HomeButtonItem(HOME_YES, "Yes", 2.0f);
+                items[count++] = HomeButtonItem(HOME_NO, "No", 2.0f);
+            }
+            SetOverlay(OVERLAY_HOME_MENU, items, count);
+        }
+    }
+
+    void OpenHomeMenu()
+    {
+        g_Home.State = HOME_MAIN;
+        g_Home.Focus = HOME_CLOSE;
+        g_Home.Pending = QUIT_NONE;
+        g_Home.LeavingFrames = 0;
+        PublishHomeMenu();
+    }
+
+    bool UpdateHomeMenu()
+    {
+        if (g_Home.State == HOME_CLOSED)
+            return false;
         if (g_QuitRequest != QUIT_NONE)
-            return g_QuitRequest;
-
-        // Swallow the button that closed the menu so the game doesn't see it.
-        for (int frame = 0; frame < 10; ++frame)
         {
-            ScanControllers();
-            VIDEO_WaitVSync();
+            g_Home.State = HOME_CLOSED;
+            SetOverlay(OVERLAY_HOME_MENU, NULL, 0);
+            return false;
         }
-        // console_init took over stdout; send the log back to the UART.
-        SYS_STDIO_Report(true);
-        return QUIT_NONE;
+
+        ScanControllers();
+        u32 down = 0;     // Wii Remote and Classic Controller buttons
+        u32 held = 0;
+        u32 padDown = 0;  // GameCube buttons
+        u32 padHeld = 0;
+        bool pointing = false;
+        float px = 0.0f, py = 0.0f, angle = 0.0f;
+        for (int chan = 0; chan < 4; ++chan)
+        {
+            down |= WPAD_ButtonsDown(chan);
+            held |= WPAD_ButtonsHeld(chan);
+            padDown |= PAD_ButtonsDown(chan);
+            padHeld |= PAD_ButtonsHeld(chan);
+            WPADData *data = WPAD_Data(chan);
+            if (!pointing && data && data->ir.valid)
+            {
+                pointing = true;
+                px = data->ir.x;
+                py = data->ir.y;
+                angle = data->ir.angle;
+            }
+        }
+
+        if (g_Home.State == HOME_LEAVING)
+        {
+            // Let go of the button that closed the menu before the game sees the controllers again.
+            if ((!held && !padHeld) || ++g_Home.LeavingFrames > 60)
+            {
+                g_Home.State = HOME_CLOSED;
+                return false;
+            }
+            return true;
+        }
+
+        const int hovered = pointing ? HomeButtonAt(px, py) : -1;
+        if (hovered >= 0)
+            g_Home.Focus = hovered;
+        SetPointer(pointing, px, py, angle);
+
+        const int dx = ((down & (WPAD_BUTTON_RIGHT | WPAD_CLASSIC_BUTTON_RIGHT)) || (padDown & PAD_BUTTON_RIGHT)) ? 1
+                     : ((down & (WPAD_BUTTON_LEFT | WPAD_CLASSIC_BUTTON_LEFT)) || (padDown & PAD_BUTTON_LEFT)) ? -1
+                                                                                                             : 0;
+        const int dy = ((down & (WPAD_BUTTON_DOWN | WPAD_CLASSIC_BUTTON_DOWN)) || (padDown & PAD_BUTTON_DOWN)) ? 1
+                     : ((down & (WPAD_BUTTON_UP | WPAD_CLASSIC_BUTTON_UP)) || (padDown & PAD_BUTTON_UP)) ? -1
+                                                                                                       : 0;
+        if (dx || dy)
+            g_Home.Focus = HomeMove(g_Home.Focus, dx, dy);
+
+        const bool select = (down & (WPAD_BUTTON_A | WPAD_CLASSIC_BUTTON_A)) || (padDown & PAD_BUTTON_A);
+        const bool back = (down & (WPAD_BUTTON_HOME | WPAD_BUTTON_B | WPAD_CLASSIC_BUTTON_HOME | WPAD_CLASSIC_BUTTON_B)) ||
+                          (padDown & PAD_BUTTON_B) || ((padDown & PAD_BUTTON_START) && (padHeld & PAD_TRIGGER_Z));
+
+        int chosen = -1;
+        if (select && (!pointing || hovered >= 0))
+            chosen = pointing ? hovered : g_Home.Focus;
+        if (back)
+            chosen = g_Home.State == HOME_CONFIRM ? HOME_NO : HOME_CLOSE;
+
+        switch (chosen)
+        {
+        case HOME_CLOSE:
+            g_Home.State = HOME_LEAVING;
+            SetOverlay(OVERLAY_HOME_MENU, NULL, 0);
+            SetPointer(false, 0.0f, 0.0f, 0.0f);
+            return true;
+        case HOME_LOADER:
+        case HOME_WII_MENU:
+            g_Home.State = HOME_CONFIRM;
+            g_Home.Pending = chosen == HOME_LOADER ? QUIT_TO_LOADER : QUIT_TO_MENU;
+            g_Home.Focus = HOME_NO;
+            break;
+        case HOME_YES:
+            RequestQuit(g_Home.Pending);
+            g_Home.State = HOME_CLOSED;
+            SetOverlay(OVERLAY_HOME_MENU, NULL, 0);
+            return false;
+        case HOME_NO:
+            g_Home.State = HOME_MAIN;
+            g_Home.Focus = g_Home.Pending == QUIT_TO_MENU ? HOME_WII_MENU : HOME_LOADER;
+            break;
+        default:
+            break;
+        }
+        PublishHomeMenu();
+        return true;
     }
 
     void GetMemoryStatus(u32 *used, u32 *available)

@@ -391,8 +391,12 @@ bool WiiGamePlayer::Update()
 
 void WiiGamePlayer::OpenHomeMenu()
 {
+    // The paused game stays on screen under the menu.
     m_CKContext->Pause();
-    if (wiisystem::ShowHomeMenu() == wiisystem::QUIT_NONE)
+    wiisystem::OpenHomeMenu();
+    while (wiisystem::UpdateHomeMenu())
+        m_RenderContext->Render();
+    if (wiisystem::GetQuitRequest() == wiisystem::QUIT_NONE)
         m_CKContext->Play();
     else
         m_Running = false;

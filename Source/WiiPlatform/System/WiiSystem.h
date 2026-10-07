@@ -46,9 +46,11 @@ namespace wiisystem
     void RequestHomeMenu();
     bool ConsumeHomeMenuRequest();
 
-    // Shows the HOME menu over a paused game. Returns QUIT_NONE to resume, or
-    // the quit action the player chose (already recorded with RequestQuit).
-    QuitAction ShowHomeMenu();
+    // HOME menu, drawn over the paused game: after OpenHomeMenu, call
+    // UpdateHomeMenu and draw a frame until it returns false. Leaving the game
+    // from the menu is recorded with RequestQuit.
+    void OpenHomeMenu();
+    bool UpdateHomeMenu();
 
     // Heap bytes in use, and bytes the heap can still hand out (free blocks
     // plus the unclaimed part of the memory arenas it grows into).
