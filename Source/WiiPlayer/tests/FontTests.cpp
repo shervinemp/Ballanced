@@ -127,6 +127,11 @@ void RunFontTests(CKContext *context)
         }
     }
 
+    // A font index from a PC's longer font list still gets a font.
+    CKTexture *fallback = fonts->CreateTextureFromFont(57, 1, FALSE, 400, FALSE, FALSE, FALSE, FALSE);
+    if (WT_CHECK(fallback != NULL, "a font index past the Wii's list falls back"))
+        context->DestroyObject(fallback);
+
     context->SetCurrentLevel(NULL);
     context->DestroyObject(level);
     remove(path.CStr());

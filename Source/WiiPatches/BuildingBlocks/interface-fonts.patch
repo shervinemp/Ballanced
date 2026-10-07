@@ -1,0 +1,117 @@
+diff --git a/Interface/CKFontManager.cpp b/Interface/CKFontManager.cpp
+index f8637f1..69a722a 100644
+--- a/Interface/CKFontManager.cpp
++++ b/Interface/CKFontManager.cpp
+@@ -185,12 +185,16 @@ static void PutFontAlphaPixel(VxImageDescEx &desc, int x, int y, CKBYTE alpha)
+     if (x < 0 || y < 0 || x >= desc.Width || y >= desc.Height || alpha == 0)
+         return;
+ 
++    // A white texel whose alpha is the glyph coverage; texels are
++    // host-order ARGB words.
+     CKBYTE *pixel = FontTexturePixel(desc, x, y);
+-    pixel[0] = 0xff;
+-    pixel[1] = 0xff;
+-    pixel[2] = 0xff;
+-    if (alpha > pixel[3])
+-        pixel[3] = alpha;
++    CKDWORD value;
++    memcpy(&value, pixel, sizeof(value));
++    CKDWORD coverage = value >> 24;
++    if (alpha > coverage)
++        coverage = alpha;
++    value = (coverage << 24) | 0x00FFFFFF;
++    memcpy(pixel, &value, sizeof(value));
+ }
+ 
+ static void RenderStbFontAtlas(StbFontHandle *handle,
+@@ -1017,9 +1021,9 @@ CKStateChunk *CKFontManager::SaveData(CKFile *SavedFile)
+ 		// FontName
+ 		chunk->WriteString(font->m_FontName);
+ 		// CharNumber
+-		chunk->WriteBuffer(sizeof(Vx2DVector), &(font->m_CharNumber));
++		chunk->WriteBuffer_LEndian(sizeof(Vx2DVector), &(font->m_CharNumber));
+ 		// FontZone
+-		chunk->WriteBuffer(sizeof(VxRect), &(font->m_FontZone));
++		chunk->WriteBuffer_LEndian(sizeof(VxRect), &(font->m_FontZone));
+ 		// Texture ID
+ 		chunk->WriteObjectID(font->m_FontTexture);
+ 		// Spacing Properties
+@@ -2352,6 +2356,28 @@ void CKFontManager::DeleteFontHandle(CKSTRING fontName)
+ #endif
+ }
+ 
++#if defined(GEKKO)
++// Compositions store a system font as its index in the font list of the PC
++// they were made on. The Wii only has the fonts in the game's Fonts folder, so
++// an index past its list takes Arial, else Roboto (installed with the game),
++// else the first font.
++static int WiiFallbackFontIndex(const CKEnumStruct *data, int sysFontIndex)
++{
++	if (!data || data->NbData <= 0 || (sysFontIndex >= 0 && sysFontIndex < data->NbData))
++		return sysFontIndex;
++	static const char *const kFallbacks[] = {"Arial", "Roboto"};
++	for (int f = 0; f < 2; ++f)
++	{
++		for (int i = 0; i < data->NbData; ++i)
++		{
++			if (data->Desc[i] && !strcmp(data->Desc[i], kFallbacks[f]))
++				return i;
++		}
++	}
++	return 0;
++}
++#endif
++
+ /*************************************************
+ Name: CreateFont
+ 
+@@ -2389,6 +2415,9 @@ CKBOOL CKFontManager::CreateFont(CKSTRING fontName, int sysFontIndex, int weight
+ 	if (!pm)
+ 		return FALSE;
+ 	CKEnumStruct *data = pm->GetEnumDescByType(pm->ParameterGuidToType(CKPGUID_FONTNAME));
++#if defined(GEKKO)
++	sysFontIndex = WiiFallbackFontIndex(data, sysFontIndex);
++#endif
+ 	if ((sysFontIndex < 0) || (sysFontIndex >= data->NbData))
+ 		return FALSE;
+ 
+@@ -2659,6 +2688,9 @@ CKTexture *CKFontManager::CreateTextureFromFont(int sysFontIndex, int resolution
+ 		return NULL;
+ 
+ 	CKEnumStruct *data = pm->GetEnumDescByType(pm->ParameterGuidToType(CKPGUID_FONTNAME));
++#if defined(GEKKO)
++	sysFontIndex = WiiFallbackFontIndex(data, sysFontIndex);
++#endif
+ 	if ((sysFontIndex < 0) || (sysFontIndex >= data->NbData))
+ 		return NULL;
+ 
+diff --git a/Interface/CKStbFontBackend.cpp b/Interface/CKStbFontBackend.cpp
+index 79bc69b..5ac73a0 100644
+--- a/Interface/CKStbFontBackend.cpp
++++ b/Interface/CKStbFontBackend.cpp
+@@ -4,6 +4,9 @@
+ #include "CKStbFontBackend.h"
+ 
+ #include "VxWindowFunctions.h"
++#if defined(GEKKO)
++#include "VxWiiPlatform.h"
++#endif
+ 
+ #include <ctype.h>
+ #include <stdio.h>
+@@ -479,6 +482,15 @@ void CKStbDefaultFontDirectories(XClassArray<XString> &directories)
+ {
+     directories.Clear();
+ 
++#if defined(GEKKO)
++    // The Wii has no system fonts: TrueType fonts go in a Fonts folder next
++    // to the game.
++    XString wiiFonts(VxWiiGetApplicationPath());
++    wiiFonts << "Fonts";
++    AddDirectory(directories, wiiFonts);
++    return;
++#endif
++
+ #if defined(__APPLE__)
+     AddDirectory(directories, XString("/System/Library/Fonts"));
+     AddDirectory(directories, XString("/System/Library/Fonts/Supplemental"));

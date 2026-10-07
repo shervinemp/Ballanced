@@ -56,44 +56,6 @@ index 0467058..948bf17 100644
                          coldata += 4;
                      }
                  }
-diff --git a/Interface/CKFontManager.cpp b/Interface/CKFontManager.cpp
-index f8637f1..e78ef49 100644
---- a/Interface/CKFontManager.cpp
-+++ b/Interface/CKFontManager.cpp
-@@ -185,12 +185,16 @@ static void PutFontAlphaPixel(VxImageDescEx &desc, int x, int y, CKBYTE alpha)
-     if (x < 0 || y < 0 || x >= desc.Width || y >= desc.Height || alpha == 0)
-         return;
- 
-+    // A white texel whose alpha is the glyph coverage; texels are
-+    // host-order ARGB words.
-     CKBYTE *pixel = FontTexturePixel(desc, x, y);
--    pixel[0] = 0xff;
--    pixel[1] = 0xff;
--    pixel[2] = 0xff;
--    if (alpha > pixel[3])
--        pixel[3] = alpha;
-+    CKDWORD value;
-+    memcpy(&value, pixel, sizeof(value));
-+    CKDWORD coverage = value >> 24;
-+    if (alpha > coverage)
-+        coverage = alpha;
-+    value = (coverage << 24) | 0x00FFFFFF;
-+    memcpy(pixel, &value, sizeof(value));
- }
- 
- static void RenderStbFontAtlas(StbFontHandle *handle,
-@@ -1017,9 +1021,9 @@ CKStateChunk *CKFontManager::SaveData(CKFile *SavedFile)
- 		// FontName
- 		chunk->WriteString(font->m_FontName);
- 		// CharNumber
--		chunk->WriteBuffer(sizeof(Vx2DVector), &(font->m_CharNumber));
-+		chunk->WriteBuffer_LEndian(sizeof(Vx2DVector), &(font->m_CharNumber));
- 		// FontZone
--		chunk->WriteBuffer(sizeof(VxRect), &(font->m_FontZone));
-+		chunk->WriteBuffer_LEndian(sizeof(VxRect), &(font->m_FontZone));
- 		// Texture ID
- 		chunk->WriteObjectID(font->m_FontTexture);
- 		// Spacing Properties
 diff --git a/TT_DatabaseManager_RT/DatabaseManager.cpp b/TT_DatabaseManager_RT/DatabaseManager.cpp
 index 0947ac6..23bc21c 100644
 --- a/TT_DatabaseManager_RT/DatabaseManager.cpp
