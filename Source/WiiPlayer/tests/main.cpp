@@ -71,6 +71,7 @@ int main(int argc, char **argv)
         wiitest::Log("No storage: file tests skipped");
 
     RunRasterizerTests();
+    RunSceneTests(context);
 
     char summary[160];
     snprintf(summary, sizeof(summary), "  %d checks, %d failed.", wiitest::CheckCount(), wiitest::FailureCount());
