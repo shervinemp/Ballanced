@@ -3,6 +3,7 @@
 #include <fat.h>
 #include <wiiuse/wpad.h>
 
+#include <malloc.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,6 +25,10 @@ namespace wiisystem
         char g_GamePath[256] = "";
         volatile QuitAction g_QuitRequest = QUIT_NONE;
         bool g_HomeMenuRequested = false;
+
+        // Where MEM2 started before the heap reached it: libogc's sbrk moves the
+        // heap from MEM1 to MEM2 once MEM1 is used up, and never moves back.
+        void *g_Arena2Start = NULL;
 
         bool g_PointerVisible = false;
         float g_PointerX = 0.0f;
@@ -132,6 +137,7 @@ namespace wiisystem
 
     bool Init(int argc, char **argv)
     {
+        g_Arena2Start = SYS_GetArena2Lo();
         VIDEO_Init();
         WPAD_Init();
         PAD_Init();
@@ -308,6 +314,18 @@ namespace wiisystem
         // console_init took over stdout; send the log back to the UART.
         SYS_STDIO_Report(true);
         return QUIT_NONE;
+    }
+
+    void GetMemoryStatus(u32 *used, u32 *available)
+    {
+        const struct mallinfo info = mallinfo();
+        const u32 arena2 = (u32)SYS_GetArena2Hi() - (u32)SYS_GetArena2Lo();
+        const bool inMem2 = g_Arena2Start && SYS_GetArena2Lo() != g_Arena2Start;
+        const u32 arena1 = inMem2 ? 0 : (u32)SYS_GetArena1Hi() - (u32)SYS_GetArena1Lo();
+        if (used)
+            *used = (u32)info.uordblks;
+        if (available)
+            *available = (u32)info.fordblks + arena1 + arena2;
     }
 
     void SetPointer(bool visible, float x, float y, float angle)

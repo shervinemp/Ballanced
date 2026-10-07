@@ -37,6 +37,7 @@ private:
     CGameConfig m_Config;
     CGameInfo *m_GameInfo;
     bool m_Running;
+    unsigned int m_FrameCount;
 
     CKContext *m_CKContext;
     CKRenderContext *m_RenderContext;

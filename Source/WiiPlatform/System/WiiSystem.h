@@ -50,6 +50,10 @@ namespace wiisystem
     // the quit action the player chose (already recorded with RequestQuit).
     QuitAction ShowHomeMenu();
 
+    // Heap bytes in use, and bytes the heap can still hand out (free blocks
+    // plus the unclaimed part of the memory arenas it grows into).
+    void GetMemoryStatus(u32 *used, u32 *available);
+
     // On-screen pointer the rasterizer draws over the game while the game
     // shows its cursor and a Wii Remote points at the screen.
     void SetPointer(bool visible, float x, float y, float angle);

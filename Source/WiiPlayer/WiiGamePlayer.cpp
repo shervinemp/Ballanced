@@ -73,6 +73,15 @@ namespace
             AddPathIfMissing(pathManager, category, path.CStr());
     }
 
+    void LogMemory(const char *when)
+    {
+        u32 used = 0;
+        u32 available = 0;
+        wiisystem::GetMemoryStatus(&used, &available);
+        CLogger::Get().Info("Memory %s: %u KB in use, %u KB free", when, (unsigned)(used / 1024),
+                            (unsigned)(available / 1024));
+    }
+
     void RegisterCompositionPaths(CKPathManager *pathManager, const char *resolvedFile)
     {
         XString dir = utils::GetFileDirectory(resolvedFile, true);
@@ -83,6 +92,7 @@ namespace
         AddDirectoryPathIfExists(pathManager, DATA_PATH_IDX, dir.CStr(), "3D Entities");
         AddPathIfMissing(pathManager, SOUND_PATH_IDX, dir.CStr());
         AddDirectoryPathIfExists(pathManager, SOUND_PATH_IDX, dir.CStr(), "Sounds");
+        AddDirectoryPathIfExists(pathManager, SOUND_PATH_IDX, dir.CStr(), "Sounds_low");
         AddPathIfMissing(pathManager, BITMAP_PATH_IDX, dir.CStr());
         AddDirectoryPathIfExists(pathManager, BITMAP_PATH_IDX, dir.CStr(), "Textures");
 
@@ -94,6 +104,7 @@ namespace
 WiiGamePlayer::WiiGamePlayer()
     : m_GameInfo(NULL),
       m_Running(false),
+      m_FrameCount(0),
       m_CKContext(NULL),
       m_RenderContext(NULL),
       m_RenderManager(NULL),
@@ -280,6 +291,7 @@ bool WiiGamePlayer::Load(const char *filename)
     if (!FinishLoad(filename, resolvedFile.CStr()))
         return false;
 
+    LogMemory("after loading");
     m_CKContext->Play();
     return true;
 }
@@ -368,6 +380,9 @@ bool WiiGamePlayer::Update()
         m_TimeManager->ResetChronos(TRUE, FALSE);
         m_RenderContext->Render(); // Waits for the vertical blank
         worked = true;
+        // Levels load from scripts, so check the heap now and then.
+        if (++m_FrameCount % 1800 == 0)
+            LogMemory("while playing");
     }
     if (!worked)
         usleep(1000);

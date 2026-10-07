@@ -59,6 +59,7 @@ int main(int argc, char **argv)
         wiitest::OpenLog("sd:/wiitests.log");
     wiitest::Log("Ballance Wii tests");
 
+    RunMemoryTests();
     RunChunkTests();
 
     WT_CHECK(CKStartUp() == CK_OK, "CKStartUp");

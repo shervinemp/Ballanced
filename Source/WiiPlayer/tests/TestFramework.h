@@ -29,6 +29,7 @@ namespace wiitest
 #define WT_CHECK_BYTES(actual, expected, size, what) wiitest::CheckBytes((actual), (expected), (size), __FILE__, __LINE__, (what))
 
 // Suites
+void RunMemoryTests();
 void RunChunkTests();
 void RunFileTests(CKContext *context);
 void RunReaderTests();

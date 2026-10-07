@@ -137,6 +137,7 @@ add_executable(WiiPlayerTests
         tests/FontTests.cpp
         tests/BehaviorTests.cpp
         tests/DatabaseTests.cpp
+        tests/MemoryTests.cpp
         "${_generated}/TestFont.c"
         "${_player_src}/StaticPlugins.cpp"
 )
