@@ -1,5 +1,6 @@
 // The on-screen keyboard that stands in for a PC keyboard when the game asks
-// for text (the high score name), and the hook the text blocks use to ask.
+// for text (the high score name), the hook the text blocks use to ask, and
+// the HOME menu.
 
 #include "TestFramework.h"
 
@@ -194,14 +195,42 @@ namespace
             input->PostProcess();
         }
     }
+
+    bool HomeMenuShows(const char *text)
+    {
+        const wiisystem::OverlayItem *items = NULL;
+        const int count = wiisystem::GetOverlay(wiisystem::OVERLAY_HOME_MENU, &items);
+        for (int i = 0; i < count; ++i)
+        {
+            if (strcmp(items[i].Text, text) == 0)
+                return true;
+        }
+        return false;
+    }
+
+    // The HOME menu stays open without input, and closes on a quit request
+    // (the console's Power and Reset buttons).
+    void TestHomeMenu()
+    {
+        wiisystem::OpenHomeMenu();
+        WT_CHECK(wiisystem::UpdateHomeMenu(), "HOME menu closed by itself");
+        WT_CHECK(HomeMenuShows("HOME Menu") && HomeMenuShows("Homebrew Channel") && HomeMenuShows("Wii Menu") &&
+                     HomeMenuShows("Close"),
+                 "HOME menu items");
+        wiisystem::RequestQuit(wiisystem::QUIT_TO_LOADER);
+        WT_CHECK(!wiisystem::UpdateHomeMenu(), "HOME menu stayed open after a quit request");
+        WT_CHECK(wiisystem::GetOverlay(wiisystem::OVERLAY_HOME_MENU, NULL) == 0, "HOME menu still drawn");
+        wiisystem::RequestQuit(wiisystem::QUIT_NONE);
+    }
 }
 
 void RunInputTests(CKContext *context)
 {
-    wiitest::BeginSuite("Screen keyboard");
+    wiitest::BeginSuite("Screen keyboard and HOME menu");
     TestTyping();
     TestLayout();
     if (context)
         TestTextInputHook(context);
+    TestHomeMenu();
     wiitest::EndSuite();
 }
