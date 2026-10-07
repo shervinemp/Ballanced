@@ -19,3 +19,9 @@ endif ()
 include("$ENV{DEVKITPRO}/cmake/Wii.cmake")
 
 set(WII ON CACHE BOOL "Building for the Nintendo Wii" FORCE)
+
+# devkitPPC links with GNU ld, which can rescan a group of archives that
+# reference each other (the IVP physics libraries do). CMake only declares this
+# for its own Unix-like platforms.
+set(CMAKE_LINK_GROUP_USING_RESCAN "LINKER:--start-group" "LINKER:--end-group")
+set(CMAKE_LINK_GROUP_USING_RESCAN_SUPPORTED TRUE)

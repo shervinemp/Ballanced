@@ -190,12 +190,18 @@ function(ballance_wii_port_vxmath)
     target_include_directories(${_vxmath} PUBLIC "$<BUILD_INTERFACE:${BALLANCE_WII_PLATFORM_DIR}/include>")
 endfunction()
 
-# CK2: big-endian state chunk and file handling.
+# CK2: big-endian state chunks and files, and Wii storage paths ("sd:/").
 function(ballance_wii_port_ck2)
     ballance_wii_patch(CK2
             ROOT "${PROJECT_SOURCE_DIR}/Source/CK2"
             PATCH "${BALLANCE_WII_PATCH_DIR}/CK2/big-endian.patch"
             FILES src/CKStateChunk.cpp src/CKFile.cpp
+            TARGETS CK2
+    )
+    ballance_wii_patch(CK2Paths
+            ROOT "${PROJECT_SOURCE_DIR}/Source/CK2"
+            PATCH "${BALLANCE_WII_PATCH_DIR}/CK2/device-paths.patch"
+            FILES src/CKPathManager.cpp
             TARGETS CK2
     )
 endfunction()
@@ -224,6 +230,14 @@ function(ballance_wii_port_render_engine)
     endforeach ()
 endfunction()
 
+# Plugins: CK2's CKJpegDecoder.cpp already compiles stb_image (JPEG only, no
+# stdio); a second copy in AVIReader collides once both are linked statically.
+function(ballance_wii_port_plugins)
+    ballance_wii_replace_sources(AVIReaderStatic
+            REMOVE "${PROJECT_SOURCE_DIR}/Source/Plugins/AVIReader/StbImageImpl.cpp"
+    )
+endfunction()
+
 # BuildingBlocks: big-endian and non-x86 fixes.
 function(ballance_wii_port_building_blocks)
     set(_root "${PROJECT_SOURCE_DIR}/Source/BuildingBlocks")
@@ -241,18 +255,27 @@ function(ballance_wii_port_building_blocks)
     )
 endfunction()
 
-# Everything is linked into one executable, so position-independent code only
-# costs registers and GOT loads on Broadway.
-function(ballance_wii_disable_pic directory)
+# Code generation settings for every target in the tree:
+#  - everything is linked into one executable, so position-independent code
+#    only costs registers and GOT loads on Broadway;
+#  - devkitPPC's GCC crashes in the LTO link step on the render engine, so the
+#    targets that request link-time optimization are compiled normally.
+function(ballance_wii_tune_targets directory)
     get_property(_targets DIRECTORY "${directory}" PROPERTY BUILDSYSTEM_TARGETS)
     foreach (_target IN LISTS _targets)
         get_target_property(_type ${_target} TYPE)
         if (_type MATCHES "^(STATIC_LIBRARY|OBJECT_LIBRARY|EXECUTABLE)$")
-            set_target_properties(${_target} PROPERTIES POSITION_INDEPENDENT_CODE OFF)
+            set_target_properties(${_target} PROPERTIES
+                    POSITION_INDEPENDENT_CODE OFF
+                    INTERPROCEDURAL_OPTIMIZATION OFF
+                    INTERPROCEDURAL_OPTIMIZATION_RELEASE OFF
+                    INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO OFF
+                    INTERPROCEDURAL_OPTIMIZATION_MINSIZEREL OFF
+            )
         endif ()
     endforeach ()
     get_property(_subdirectories DIRECTORY "${directory}" PROPERTY SUBDIRECTORIES)
     foreach (_subdirectory IN LISTS _subdirectories)
-        ballance_wii_disable_pic("${_subdirectory}")
+        ballance_wii_tune_targets("${_subdirectory}")
     endforeach ()
 endfunction()

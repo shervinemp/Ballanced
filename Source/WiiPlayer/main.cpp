@@ -1,81 +1,78 @@
 #include <stdio.h>
-#include <unistd.h>
+
 #include "GameConfig.h"
-#include "GamePlayer.h"
+#include "Logger.h"
+#include "Utils.h"
+#include "VxWiiPlatform.h"
+#include "WiiGamePlayer.h"
+#include "WiiSystem.h"
 
-#ifdef WII
-#include <gccore.h>
-#include <fat.h>
-#include <wiiuse/wpad.h>
-#include <isfs.h>
+int main(int argc, char **argv)
+{
+    const bool storage = wiisystem::Init(argc, argv);
+    const char *gamePath = wiisystem::GetGamePath();
+    VxWiiSetApplicationPath(gamePath);
+    VxWiiSetDisplaySize(wiisystem::GetRenderWidth(), wiisystem::GetRenderHeight());
 
-void PowerCallback(s32 chan) {
-    exit(0);
-}
-#endif
-
-int main(int argc, char** argv) {
-#ifdef WII
-    // Initialize the Wii video and hardware subsystems
-    VIDEO_Init();
-    WPAD_Init();
-    ISFS_Initialize();
-
-    // Configure video mode based on hardware settings
-    GXRModeObj* rmode = VIDEO_GetPreferredMode(NULL);
-    if (CONF_GetAspectRatio() == CONF_ASPECT_16_9) {
-        rmode->viWidth = 678;
-    }
-    if (CONF_GetProgressiveScan() > 0 && VIDEO_HaveComponentCable()) {
-        rmode->viTVMode = VI_PROG;
-    }
-    VIDEO_Configure(rmode);
-
-    // Set callback for graceful exit via console power button
-    WPAD_SetPowerButtonCallback(PowerCallback);
-
-    // Ensure the default allocator does not leak indiscriminately into MEM2.
-    // Instead of forcing the primary heap entirely into MEM2 via SYS_SetArena1Hi(SYS_GetArena1Lo()),
-    // we let MEM1 handle core execution and physics buffers naturally,
-    // and manually configure libogc to expose MEM2 via mem2_malloc() / memalign()
-    // or through Virtools' CKArena logic for large asset loads.
-
-    // Initialize the FAT filesystem (SD Card / USB)
-    // To support asynchronous file loading smoothly and prevent frame drops mid-game,
-    // ensure file read operations within the engine are wrapped using libogc LWP threads.
-    if (!fatInitDefault()) {
-        printf("FAT Init Failed! Please insert an SD Card.\n");
-        return -1;
+    if (!storage)
+    {
+        wiisystem::ShowMessage("No SD card or USB storage device was found.",
+                               "  Insert the SD card or USB drive that holds Ballance and try again.");
+        wiisystem::Exit();
     }
 
-    // Create ISFS save directory if it doesn't exist
-    // 00010000 = standard games, 5242414C = 'RBAL' (Custom Title ID for Ballance)
-    ISFS_CreateDir("/title/00010000/5242414C", 0, 3, 3, 3);
-    ISFS_CreateDir("/title/00010000/5242414C/data", 0, 3, 3, 3);
-
-    // Change the working directory to the standard homebrew path
-    // This allows the engine to find the 'Textures' and 'Sounds' folders natively
-    chdir("sd:/apps/ballance/");
-#endif
-
-    // Run engine
     CGameConfig config;
-    CGamePlayer player;
+    config.SetRuntimeBasePath(gamePath);
+    config.LoadFromIni();
+    // The TV picture has one mode; desktop window settings do not apply.
+    config.driver = 0;
+    config.width = wiisystem::GetRenderWidth();
+    config.height = wiisystem::GetRenderHeight();
+    config.bpp = 32;
+    config.fullscreen = false;
+    config.manualSetup = false;
 
-    if (!player.Init(config, NULL))
-        return -1;
+    XString logPath;
+    if (config.ResolvePath(eLogPath, logPath))
+        CLogger::Get().Open(logPath.CStr(), config.logMode == eLogOverwrite,
+                            config.verbose ? CLogger::LEVEL_DEBUG : CLogger::LEVEL_INFO);
+    CLogger::Get().Info("Ballance for Wii starting from %s", gamePath);
 
-    if (!player.Load()) {
-        player.Shutdown();
-        return -1;
+    XString cmoPath;
+    if (!config.ResolvePath(eCmoPath, cmoPath) || !utils::FileOrDirectoryExists(cmoPath.CStr()))
+    {
+        char message[512];
+        snprintf(message, sizeof(message),
+                 "  Copy the contents of your Ballance installation (base.cmo,\n"
+                 "  Database.tdb and the 3D Entities, Sounds, Textures and Text\n"
+                 "  folders) to %s next to boot.dol.", gamePath);
+        wiisystem::ShowMessage("The Ballance game files were not found.", message);
+        wiisystem::Exit();
     }
 
-    player.Run();
+    {
+        WiiGamePlayer player;
+        if (!player.Init(config))
+        {
+            CLogger::Get().Error("Failed to start the engine.");
+            wiisystem::ShowMessage("Ballance could not start.", "  Details were written to Player.log.");
+        }
+        else if (!player.Load())
+        {
+            CLogger::Get().Error("Failed to load the game.");
+            wiisystem::ShowMessage("The game files could not be loaded.", "  Details were written to Player.log.");
+        }
+        else
+        {
+            player.Run();
+        }
+        player.Shutdown();
+    }
 
-    player.Shutdown();
+    if (!config.SaveToIni())
+        CLogger::Get().Warn("Could not save Player.ini.");
+    CLogger::Get().Close();
 
-#ifdef WII
-    ISFS_Deinitialize();
-#endif
+    wiisystem::Exit();
     return 0;
 }

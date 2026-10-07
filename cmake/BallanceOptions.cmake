@@ -25,6 +25,10 @@ if (WII)
     # The Wii has no dynamic loader, so every Virtools module is linked into the executable.
     set(BALLANCE_BUILD_STATIC ON CACHE BOOL
             "Build Player with Virtools modules linked statically" FORCE)
+    # Only boot.dol and the Homebrew Channel files are installed.
+    foreach (_component IN ITEMS VXMATH CK2 CKRE CKBB CKPLUGINS SDLINPUT SDLSOUND CKPARAMOP)
+        ballance_set_cache_default(${_component}_INSTALL OFF BOOL "")
+    endforeach ()
 endif ()
 ballance_set_cache_default(BALLANCE_BUILD_STATIC OFF BOOL
         "Build Player with Virtools modules linked statically")
@@ -37,6 +41,9 @@ if (WII)
     # desktop platform layer get an empty target; Source/WiiPlatform supplies the
     # native implementations (see cmake/WiiPort.cmake).
     add_library(SDL3::SDL3 INTERFACE IMPORTED GLOBAL)
+    # No dynamic loader either: the dlfcn.h stubs in Source/WiiPlatform/include
+    # stand in for libdl, so components must not link it.
+    set(CMAKE_DL_LIBS "")
 else ()
     find_package(SDL3 3.4.8 CONFIG REQUIRED)
 endif ()

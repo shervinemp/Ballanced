@@ -1,0 +1,98 @@
+--- a/src/Utils.cpp
++++ b/src/Utils.cpp
+@@ -24,7 +24,11 @@
+ #include <unistd.h>
+ #endif
+ 
++#if defined(GEKKO)
++#include "VxWiiPlatform.h"
++#else
+ #include <SDL3/SDL.h>
++#endif
+ 
+ namespace utils
+ {
+@@ -42,6 +46,19 @@
+         return ch == '\\' || ch == '/';
+     }
+ 
++#if defined(GEKKO)
++    // Wii storage paths start with a device name: "sd:/apps/ballance".
++    static int DevicePrefixLength(const char *path)
++    {
++        if (!path)
++            return 0;
++        int i = 0;
++        while (isalnum(static_cast<unsigned char>(path[i])))
++            ++i;
++        return (i > 0 && path[i] == ':' && IsPathSeparator(path[i + 1])) ? i + 2 : 0;
++    }
++#endif
++
+     // A root keeps its separator: "/" and "C:\" name a directory, "" and
+     // "C:" do not.
+     static bool IsRootPath(const XString &path)
+@@ -49,6 +66,10 @@
+         const int length = (int)path.Length();
+         if (length == 1)
+             return IsPathSeparator(path[0]);
++#if defined(GEKKO)
++        if (DevicePrefixLength(path.CStr()) == length)
++            return true;
++#endif
+ #if defined(_WIN32)
+         return length == 3 && isalpha(static_cast<unsigned char>(path[0])) && path[1] == ':' &&
+                IsPathSeparator(path[2]);
+@@ -57,6 +78,7 @@
+ #endif
+     }
+ 
++
+     static XString GetCurrentPathString()
+     {
+ #if defined(_WIN32)
+@@ -92,6 +114,15 @@
+         outRect.right = 1920;
+         outRect.bottom = 1080;
+ 
++#if defined(GEKKO)
++        (void)window;
++        int width = 0;
++        int height = 0;
++        VxWiiGetDisplaySize(&width, &height);
++        outRect.right = width;
++        outRect.bottom = height;
++        return true;
++#else
+         SDL_DisplayID display = 0;
+         if (window)
+             display = SDL_GetDisplayForWindow(static_cast<SDL_Window *>(window));
+@@ -117,6 +148,7 @@
+ 
+         SDL_free(displays);
+         return ok;
++#endif
+     }
+ 
+     bool FileOrDirectoryExists(const char *file)
+@@ -157,6 +189,8 @@
+             return IsPathSeparator(path[2]);
+         return IsPathSeparator(path[0]) && IsPathSeparator(path[1]) &&
+                path[2] != '\0' && !IsPathSeparator(path[2]);
++#elif defined(GEKKO)
++        return path[0] == '/' || DevicePrefixLength(path) > 0;
+ #else
+         return path[0] == '/';
+ #endif
+@@ -220,7 +254,11 @@
+ 
+     XString GetExecutableDirectory()
+     {
++#if defined(GEKKO)
++        const char *basePath = VxWiiGetApplicationPath();
++#else
+         const char *basePath = SDL_GetBasePath();
++#endif
+         if (basePath && basePath[0] != '\0')
+             return WithTrailingPathSeparator(basePath);
+ 

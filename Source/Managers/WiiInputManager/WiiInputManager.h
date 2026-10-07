@@ -3,60 +3,136 @@
 
 #include "CKAll.h"
 
-#ifdef WII
-#include <wiiuse/wpad.h>
-#endif
+#define WII_KEYBOARD_SIZE 256
+#define WII_KEY_BUFFER_SIZE 256
+#define WII_JOYSTICK_COUNT 4
 
-class WiiInputManager : public CKInputManager {
+/**
+ * Input manager for the Nintendo Wii.
+ *
+ * Ballance reads the keyboard (DirectInput scan codes) and the mouse, so the
+ * Wii controllers are presented as a virtual keyboard and mouse:
+ *
+ *   Wii Remote held sideways   D-Pad = arrows, 1 = Shift (rotate camera),
+ *                              2 = Space (overhead camera), + = Esc, A = Enter
+ *   Wii Remote pointing        pointer = mouse, A = click (Enter when off screen),
+ *                              B = Esc, D-Pad = arrows
+ *   Nunchuk                    stick = arrows, Z = Shift, C = Space
+ *   Classic / GameCube pad     stick or D-Pad = arrows, A = Enter, B = Esc,
+ *                              L/Y/Z = Shift, R/X = Space, +/Start = Esc
+ *   USB keyboard               keys as on a PC
+ *
+ * HOME opens the HOME menu (handled by the player).
+ */
+class WiiInputManager : public CKInputManager
+{
 public:
-    WiiInputManager(CKContext* Context);
-    virtual ~WiiInputManager();
+    WiiInputManager(CKContext *context);
+    ~WiiInputManager() override;
 
-    virtual CKERROR OnCKInit();
-    virtual CKERROR OnCKEnd();
-    virtual CKERROR PreProcess();
+    // Keyboard
+    void EnableKeyboardRepetition(CKBOOL iEnable = TRUE) override;
+    CKBOOL IsKeyboardRepetitionEnabled() override;
+    CKBOOL IsKeyDown(CKDWORD iKey, CKDWORD *oStamp = NULL) override;
+    CKBOOL IsKeyUp(CKDWORD iKey) override;
+    CKBOOL IsKeyToggled(CKDWORD iKey, CKDWORD *oStamp = NULL) override;
+    int GetKeyName(CKDWORD iKey, char *oKeyName) override;
+    CKDWORD GetKeyFromName(CKSTRING iKeyName) override;
+    unsigned char *GetKeyboardState() override;
+    CKBOOL IsKeyboardAttached() override;
+    int GetNumberOfKeyInBuffer() override;
+    int GetKeyFromBuffer(int i, CKDWORD &oKey, CKDWORD *oTimeStamp = NULL) override;
 
-    virtual void EnableKeyboardRepetition(CKBOOL iEnable = TRUE);
-    virtual CKBOOL IsKeyboardRepetitionEnabled();
-    virtual CKBOOL IsKeyDown(CKDWORD iKey, CKDWORD *oStamp = NULL);
-    virtual CKBOOL IsKeyUp(CKDWORD iKey);
-    virtual CKBOOL IsKeyToggled(CKDWORD iKey, CKDWORD *oStamp = NULL);
-    virtual int GetKeyName(CKDWORD iKey, char *oKeyName);
-    virtual CKDWORD GetKeyFromName(CKSTRING iKeyName);
-    virtual unsigned char *GetKeyboardState();
-    virtual CKBOOL IsKeyboardAttached();
-    virtual int GetNumberOfKeyInBuffer();
-    virtual int GetKeyFromBuffer(int i, CKDWORD &oKey, CKDWORD *oTimeStamp = NULL);
+    // Mouse (the Wii Remote pointer)
+    CKBOOL IsMouseButtonDown(CK_MOUSEBUTTON iButton) override;
+    CKBOOL IsMouseClicked(CK_MOUSEBUTTON iButton) override;
+    CKBOOL IsMouseToggled(CK_MOUSEBUTTON iButton) override;
+    void GetMouseButtonsState(CKBYTE oStates[4]) override;
+    void GetMousePosition(Vx2DVector &oPosition, CKBOOL iAbsolute = TRUE) override;
+    void GetMouseRelativePosition(VxVector &oPosition) override;
+    CKBOOL IsMouseAttached() override;
 
-    virtual CKBOOL IsMouseButtonDown(CK_MOUSEBUTTON iButton);
-    virtual CKBOOL IsMouseClicked(CK_MOUSEBUTTON iButton);
-    virtual CKBOOL IsMouseToggled(CK_MOUSEBUTTON iButton);
-    virtual void GetMouseButtonsState(CKBYTE oStates[4]);
-    virtual void GetMousePosition(Vx2DVector &oPosition, CKBOOL iAbsolute = TRUE);
-    virtual void GetMouseRelativePosition(VxVector &oPosition);
-    virtual CKBOOL IsMouseAttached();
+    // Joysticks: Classic Controllers / Nunchuks / GameCube pads, one per port
+    CKBOOL IsJoystickAttached(int iJoystick) override;
+    void GetJoystickPosition(int iJoystick, VxVector *oPosition) override;
+    void GetJoystickRotation(int iJoystick, VxVector *oRotation) override;
+    void GetJoystickSliders(int iJoystick, Vx2DVector *oPosition) override;
+    void GetJoystickPointOfViewAngle(int iJoystick, float *oAngle) override;
+    CKDWORD GetJoystickButtonsState(int iJoystick) override;
+    CKBOOL IsJoystickButtonDown(int iJoystick, int iButton) override;
 
-    virtual CKBOOL IsJoystickAttached(int iJoystick);
-    virtual void GetJoystickPosition(int iJoystick, VxVector *oPosition);
-    virtual void GetJoystickRotation(int iJoystick, VxVector *oRotation);
-    virtual void GetJoystickSliders(int iJoystick, Vx2DVector *oPosition);
-    virtual void GetJoystickPointOfViewAngle(int iJoystick, float *oAngle);
-    virtual CKDWORD GetJoystickButtonsState(int iJoystick);
-    virtual CKBOOL IsJoystickButtonDown(int iJoystick, int iButton);
+    void Pause(CKBOOL pause) override;
 
-    virtual void Pause(CKBOOL pause);
-    virtual void ShowCursor(CKBOOL iShow);
-    virtual CKBOOL GetCursorVisibility();
+    void ShowCursor(CKBOOL iShow) override;
+    CKBOOL GetCursorVisibility() override;
+    VXCURSOR_POINTER GetSystemCursor() override;
+    void SetSystemCursor(VXCURSOR_POINTER cursor) override;
 
-    virtual VXCURSOR_POINTER GetSystemCursor();
-    virtual void SetSystemCursor(VXCURSOR_POINTER cursor);
+    CKERROR OnCKInit() override;
+    CKERROR OnCKEnd() override;
+    CKERROR OnCKReset() override;
+    CKERROR OnCKPlay() override;
+    CKERROR PreProcess() override;
+    CKERROR PostProcess() override;
+
+    CKDWORD GetValidFunctionsMask() override
+    {
+        return CKMANAGER_FUNC_OnCKInit | CKMANAGER_FUNC_OnCKEnd | CKMANAGER_FUNC_OnCKReset |
+               CKMANAGER_FUNC_OnCKPlay | CKMANAGER_FUNC_PreProcess | CKMANAGER_FUNC_PostProcess;
+    }
 
 private:
+    struct KeyEvent
+    {
+        CKDWORD Key;
+        CKDWORD Data; // 0x80 pressed, 0x00 released
+        CKDWORD TimeStamp;
+    };
+
+    struct Joystick
+    {
+        CKBOOL Attached;
+        VxVector Position;
+        VxVector Rotation;
+        Vx2DVector Sliders;
+        float PointOfView;
+        CKDWORD Buttons;
+    };
+
+    void ClearState();
+    void PollUsbKeyboard(CKDWORD now);
+    void PollControllers(CKBYTE wanted[WII_KEYBOARD_SIZE], CKDWORD now);
+    void PollPointer();
+    void PressKey(CKDWORD key, CKDWORD now);
+    void ReleaseKey(CKDWORD key, CKDWORD now);
+    void PushKeyEvent(CKDWORD key, CKDWORD data, CKDWORD now);
+    void RepeatKeys(CKDWORD now);
+
+    CKBYTE m_KeyboardState[WII_KEYBOARD_SIZE];
+    CKDWORD m_KeyboardStamps[WII_KEYBOARD_SIZE];
+    CKBYTE m_PadKeys[WII_KEYBOARD_SIZE];   // Keys held through controllers last frame
+    CKBYTE m_UsbKeys[WII_KEYBOARD_SIZE];   // Keys held on a USB keyboard
+    KeyEvent m_KeyBuffer[WII_KEY_BUFFER_SIZE];
+    int m_KeyBufferCount;
+    CKBOOL m_KeyboardRepetition;
+    CKDWORD m_RepeatDelay;
+    CKDWORD m_RepeatInterval;
+    CKBOOL m_UsbKeyboardReady;
+    CKBOOL m_UsbKeyboardAttached;
+
+    Vx2DVector m_MousePosition;
+    VxVector m_MouseDelta;
+    CKBYTE m_MouseButtons[4];
+    CKBYTE m_LastMouseButtons[4];
+    CKBOOL m_PointerOnScreen;
+    int m_PointerChannel;
+
+    Joystick m_Joysticks[WII_JOYSTICK_COUNT];
+    int m_ControllersConnected;
+
+    CKBOOL m_Paused;
     CKBOOL m_CursorVisible;
-#ifdef WII
-    Vx2DVector m_LastCursorPos;
-    int m_LastExpType;
-#endif
+    VXCURSOR_POINTER m_Cursor;
 };
 
 #endif // WIIINPUTMANAGER_H
