@@ -67,8 +67,12 @@ endforeach ()
 configure_file("${_player_src}/StaticPluginRegistry.generated.h.in"
         "${_generated}/StaticPluginRegistry.generated.h" @ONLY)
 
+# A 1 MB main stack, like Windows gives the engine (see MainStack.c).
+set(_main_stack "${CMAKE_SOURCE_DIR}/Source/WiiPlatform/System/MainStack.c")
+
 add_executable(WiiPlayer
         main.cpp
+        "${_main_stack}"
         WiiGamePlayer.cpp
         WiiGamePlayer.h
         "${_player_src}/GameConfig.cpp"
@@ -124,6 +128,7 @@ configure_file("${_generated}/TestFont.c.in" "${_generated}/TestFont.c" COPYONLY
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_test_font}")
 add_executable(WiiPlayerTests
         tests/main.cpp
+        "${_main_stack}"
         tests/TestFramework.cpp
         tests/TestFramework.h
         tests/ChunkTests.cpp
