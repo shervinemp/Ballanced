@@ -136,15 +136,17 @@ add_executable(WiiPlayerTests
         tests/PhysicsTests.cpp
         tests/FontTests.cpp
         tests/BehaviorTests.cpp
+        tests/DatabaseTests.cpp
         "${_generated}/TestFont.c"
         "${_player_src}/StaticPlugins.cpp"
 )
 target_compile_features(WiiPlayerTests PRIVATE cxx_std_17)
 target_compile_definitions(WiiPlayerTests PRIVATE BALLANCE_STATIC_MODULES ${_static_definitions})
-# The physics and font suites drive their managers directly, like their own tests.
+# The physics, font and database suites drive their managers directly.
 target_include_directories(WiiPlayerTests PRIVATE "${_player_src}" "${_generated}"
         "${CMAKE_SOURCE_DIR}/Source/BuildingBlocks/physics_RT"
-        "${CMAKE_SOURCE_DIR}/Source/BuildingBlocks/Interface")
+        "${CMAKE_SOURCE_DIR}/Source/BuildingBlocks/Interface"
+        "${CMAKE_SOURCE_DIR}/Source/BuildingBlocks/TT_DatabaseManager_RT")
 target_link_libraries(WiiPlayerTests PRIVATE ${_static_targets} CKGXRasterizer CK2 VxMath WiiSystem ivp_controller)
 set_target_properties(WiiPlayerTests PROPERTIES OUTPUT_NAME tests SUFFIX ".elf")
 ogc_create_dol(WiiPlayerTests)
