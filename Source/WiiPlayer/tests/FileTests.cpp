@@ -5,16 +5,23 @@
 
 #include "CKAll.h"
 
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
 namespace
 {
     const char *kPath = "sd:/wiitest.nmo";
+    const CKGUID kFormatReader(0x11223344, 0x55667788);
 
     CKDWORD LE32At(const CKBYTE *bytes)
     {
         return (CKDWORD)bytes[0] | ((CKDWORD)bytes[1] << 8) | ((CKDWORD)bytes[2] << 16) | ((CKDWORD)bytes[3] << 24);
+    }
+
+    CKWORD LE16At(const CKBYTE *bytes)
+    {
+        return (CKWORD)(bytes[0] | (bytes[1] << 8));
     }
 
     bool Near8(float a, float b)
@@ -43,6 +50,36 @@ namespace
         WT_CHECK(LE32At(header + 16) == 8, "file version %08X (little-endian 8)", LE32At(header + 16));
         WT_CHECK(LE32At(header + 20) == 0, "second file version");
         WT_CHECK(LE32At(header + 44) >= 6, "object count %u", LE32At(header + 44));
+    }
+
+    // A texture's save format is a structure stored whole in its chunk, in the
+    // file byte order like everything else.
+    void CheckSaveFormatBytes(CKTexture *texture)
+    {
+        CKStateChunk *chunk = CKSaveObjectState(texture);
+        if (!WT_CHECK(chunk != NULL, "texture state saved"))
+            return;
+        chunk->StartRead();
+        if (WT_CHECK(chunk->SeekIdentifier(CK_STATESAVE_TEXSAVEFORMAT), "texture save format saved"))
+        {
+            void *buffer = NULL;
+            const int size = chunk->ReadBuffer(&buffer);
+            const CKBYTE *bytes = (const CKBYTE *)buffer;
+            if (WT_CHECK(bytes && size == (int)sizeof(CKBitmapProperties), "save format size %d", size))
+            {
+                WT_CHECK(LE32At(bytes) == sizeof(CKBitmapProperties), "save format m_Size %08X", LE32At(bytes));
+                const CKBYTE *guid = bytes + offsetof(CKBitmapProperties, m_ReaderGuid);
+                WT_CHECK(LE32At(guid) == kFormatReader.d1 && LE32At(guid + 4) == kFormatReader.d2,
+                         "save format reader %08X %08X", LE32At(guid), LE32At(guid + 4));
+                WT_CHECK(memcmp(bytes + offsetof(CKBitmapProperties, m_Ext), "tga", 4) == 0, "save format extension");
+                const CKDWORD width = LE32At(bytes + offsetof(CKBitmapProperties, m_Format.Width));
+                WT_CHECK(width == 0x01020304, "save format width %08X", width);
+                const CKWORD entry = LE16At(bytes + offsetof(CKBitmapProperties, m_Format.BytesPerColorEntry));
+                WT_CHECK(entry == 0x0506, "save format colour entry size %04X", entry);
+            }
+            CKDeletePointer(buffer);
+        }
+        DeleteCKStateChunk(chunk);
     }
 }
 
@@ -90,6 +127,13 @@ void RunFileTests(CKContext *context)
         texture->ReleaseSurfacePtr();
     }
     material->SetTexture0(texture);
+    CKBitmapProperties saveFormat;
+    saveFormat.m_ReaderGuid = kFormatReader;
+    saveFormat.m_Ext = CKFileExtension("tga");
+    saveFormat.m_Format.Width = 0x01020304;
+    saveFormat.m_Format.BytesPerColorEntry = 0x0506;
+    texture->SetSaveFormat(&saveFormat);
+    CheckSaveFormatBytes(texture);
 
     CKMesh *mesh = (CKMesh *)context->CreateObject(CKCID_MESH, (CKSTRING) "WiiTestMesh");
     mesh->SetVertexCount(3);
@@ -214,6 +258,10 @@ void RunFileTests(CKContext *context)
         }
         texture->ReleaseSurfacePtr();
         WT_CHECK(!material || material->GetTexture() == texture, "material texture reference");
+        const CKBitmapProperties *format = texture->GetSaveFormat();
+        WT_CHECK(format && format->m_ReaderGuid == kFormatReader && format->m_Format.Width == 0x01020304 &&
+                     format->m_Format.BytesPerColorEntry == 0x0506,
+                 "texture save format loaded");
     }
 
     mesh = (CKMesh *)context->GetObjectByNameAndClass((CKSTRING) "WiiTestMesh", CKCID_MESH);

@@ -102,3 +102,65 @@ index aa1dde0..2d65b3f 100644
                      if (ctrl->GetType() == CKANIMATION_MORPH_CONTROL) {
                          if (!static_cast<RCKMorphController *>(ctrl)->ReadKeysFromBuffer(buffer, static_cast<int>(dataSize) * 4)) {
                              DeleteController(ctrlType);
+diff --git a/src/CKSprite.cpp b/src/CKSprite.cpp
+index 8755e38..2ff8a64 100644
+--- a/src/CKSprite.cpp
++++ b/src/CKSprite.cpp
+@@ -613,7 +613,11 @@ CKStateChunk *RCKSprite::Save(CKFile *file, CKDWORD flags) {
+         chunk->WriteDword(m_BitmapData.m_SaveOptions);
+ 
+         if (m_BitmapData.m_SaveProperties) {
+-            chunk->WriteBuffer(m_BitmapData.m_SaveProperties->m_Size, m_BitmapData.m_SaveProperties);
++            XArray<CKBYTE> properties;
++            properties.Resize(m_BitmapData.m_SaveProperties->m_Size);
++            memcpy(properties.Begin(), m_BitmapData.m_SaveProperties, properties.Size());
++            CKConvertBitmapPropertiesEndian(properties.Begin(), properties.Size());
++            chunk->WriteBuffer(properties.Size(), properties.Begin());
+         } else {
+             chunk->WriteBuffer(0, nullptr);
+         }
+@@ -663,6 +667,7 @@ CKERROR RCKSprite::Load(CKStateChunk *chunk, CKFile *file) {
+                 m_BitmapData.m_SaveOptions = (CK_BITMAP_SAVEOPTIONS) chunk->ReadDword();
+                 void *buf = nullptr;
+                 int size = chunk->ReadBuffer(&buf);
++                CKConvertBitmapPropertiesEndian(buf, size);
+                 if (buf) {
+                     if (chunk->GetDataVersion() > 6) {
+                         SetSaveFormat((CKBitmapProperties *) buf);
+diff --git a/src/CKTexture.cpp b/src/CKTexture.cpp
+index 00b6f8a..fdfa8dc 100644
+--- a/src/CKTexture.cpp
++++ b/src/CKTexture.cpp
+@@ -852,7 +852,11 @@ CKStateChunk *RCKTexture::Save(CKFile *file, CKDWORD flags) {
+ 
+     if (m_SaveProperties) {
+         chunk->WriteIdentifier(CK_STATESAVE_TEXSAVEFORMAT);
+-        chunk->WriteBuffer(m_SaveProperties->m_Size, m_SaveProperties);
++        XArray<CKBYTE> properties;
++        properties.Resize(m_SaveProperties->m_Size);
++        memcpy(properties.Begin(), m_SaveProperties, properties.Size());
++        CKConvertBitmapPropertiesEndian(properties.Begin(), properties.Size());
++        chunk->WriteBuffer(properties.Size(), properties.Begin());
+     }
+ 
+     if (m_MipMaps) {
+@@ -917,7 +921,8 @@ CKERROR RCKTexture::Load(CKStateChunk *chunk, CKFile *file) {
+         if (chunk->SeekIdentifier(CK_STATESAVE_TEXSAVEFORMAT)) {
+             m_SaveOptions = static_cast<CK_BITMAP_SAVEOPTIONS>(chunk->ReadDword());
+             CKBitmapProperties *format = nullptr;
+-            chunk->ReadBuffer((void **) &format);
++            const int formatSize = chunk->ReadBuffer((void **) &format);
++            CKConvertBitmapPropertiesEndian(format, formatSize);
+             if (format) {
+                 if (chunk->GetDataVersion() > CHUNK_VERSION3) {
+                     SetSaveFormat(format);
+@@ -992,7 +997,8 @@ CKERROR RCKTexture::Load(CKStateChunk *chunk, CKFile *file) {
+ 
+         if (chunk->SeekIdentifier(CK_STATESAVE_TEXSAVEFORMAT)) {
+             CKBitmapProperties *format = nullptr;
+-            chunk->ReadBuffer((void **) &format);
++            const int formatSize = chunk->ReadBuffer((void **) &format);
++            CKConvertBitmapPropertiesEndian(format, formatSize);
+             if (format) {
+                 if (chunk->GetDataVersion() > CHUNK_VERSION3) {
+                     SetSaveFormat(format);

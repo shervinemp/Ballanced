@@ -228,11 +228,11 @@ function(ballance_wii_port_render_engine)
             FILES src/CK2_3D.cpp
             TARGETS CK2_3D
     )
-    # Animation controller keys are dumped into chunks as raw words.
+    # Animation controller keys and bitmap save properties are raw chunk words.
     ballance_wii_patch(RenderEngineEndian
             ROOT "${_root}"
             PATCH "${BALLANCE_WII_PATCH_DIR}/RenderEngine/big-endian.patch"
-            FILES src/CKObjectAnimation.cpp
+            FILES src/CKObjectAnimation.cpp src/CKSprite.cpp src/CKTexture.cpp
             TARGETS CK2_3D
     )
     _ballance_wii_resolve_target(_ck2_3d CK2_3D)

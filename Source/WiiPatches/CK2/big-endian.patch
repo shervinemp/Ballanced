@@ -1,5 +1,5 @@
 diff --git a/include/CKStateChunk.h b/include/CKStateChunk.h
-index c702012..ff2a49b 100644
+index c702012..fee4ec3 100644
 --- a/include/CKStateChunk.h
 +++ b/include/CKStateChunk.h
 @@ -7,10 +7,35 @@
@@ -39,7 +39,19 @@ index c702012..ff2a49b 100644
      int ChunkSize;
      CKBOOL Flag;
      int *Ids;
-@@ -390,7 +415,7 @@ public:
+@@ -175,6 +200,11 @@ class CKFileChunk;
+ class CKBitmapReader;
+ struct CKBitmapProperties;
+ 
++// Converts a CKBitmapProperties buffer of size bytes between the host byte
++// order and the little-endian layout chunks save it with. Fields that follow
++// the base structure (reader-specific properties) are taken as 32-bit words.
++DLL_EXPORT void CKConvertBitmapPropertiesEndian(void *properties, int size);
++
+ /**************************************************************************
+ Name: CKStateChunk
+ 
+@@ -390,7 +420,7 @@ public:
  private:
      int m_ChunkClassID;
      int m_ChunkSize;
@@ -283,10 +295,15 @@ index e598eab..6a45c29 100644
                  chunk->WriteBuffer(m_Size, m_Buffer);
              }
 diff --git a/src/CKStateChunk.cpp b/src/CKStateChunk.cpp
-index 2aebd3d..61f1897 100644
+index 2aebd3d..d60e770 100644
 --- a/src/CKStateChunk.cpp
 +++ b/src/CKStateChunk.cpp
-@@ -13,6 +13,86 @@
+@@ -9,10 +9,110 @@
+ 
+ #include <miniz.h>
+ #include <climits>
++#include <cstddef>
+ 
  XObjectPointerArray CKStateChunk::m_TempXOPA;
  XObjectArray CKStateChunk::m_TempXOA;
  
@@ -341,6 +358,25 @@ index 2aebd3d..61f1897 100644
 +    return it->Flag ? list[index] : CKChunkWord::Swap(list[index]);
 +}
 +
++void CKConvertBitmapPropertiesEndian(void *properties, int size) {
++    if (!CK_CHUNK_BIG_ENDIAN || !properties || size <= 0)
++        return;
++    // Words throughout, except the four characters of m_Ext and the two 16-bit
++    // colour map fields of m_Format.
++    CKBYTE *bytes = static_cast<CKBYTE *>(properties);
++    const int ext = (int) offsetof(CKBitmapProperties, m_Ext);
++    const int format = (int) offsetof(CKBitmapProperties, m_Format);
++    const int shorts = (int) offsetof(CKBitmapProperties, m_Format.BytesPerColorEntry);
++    const int pointers = (int) offsetof(CKBitmapProperties, m_Format.ColorMap);
++    SwapChunkWords32(bytes, (size < ext ? size : ext));
++    if (size > format)
++        SwapChunkWords32(bytes + format, (size < shorts ? size : shorts) - format);
++    if (size > shorts)
++        SwapChunkWords16(bytes + shorts, (size < pointers ? size : pointers) - shorts);
++    if (size > pointers)
++        SwapChunkWords32(bytes + pointers, size - pointers);
++}
++
 +// 32-bit pixels are host-order ARGB words: byte offset of each channel.
 +static const int kPixelBlueByte = CK_CHUNK_BIG_ENDIAN ? 3 : 0;
 +static const int kPixelGreenByte = CK_CHUNK_BIG_ENDIAN ? 2 : 1;
@@ -373,7 +409,7 @@ index 2aebd3d..61f1897 100644
  CKStateChunk *CreateCKStateChunk(CK_CLASSID id, CKFile *file) {
      return new CKStateChunk(id, file);
  }
-@@ -102,7 +182,7 @@ void CKStateChunk::Clone(CKStateChunk *chunk) {
+@@ -102,7 +202,7 @@ void CKStateChunk::Clone(CKStateChunk *chunk) {
          m_Managers = new IntListStruct(*chunk->m_Managers);
  
      if (chunk->m_Data) {
@@ -382,7 +418,7 @@ index 2aebd3d..61f1897 100644
          memcpy(m_Data, chunk->m_Data, m_ChunkSize * sizeof(int));
          if (m_ChunkParser)
              m_ChunkParser->DataSize = m_ChunkSize;
-@@ -163,7 +243,7 @@ void CKStateChunk::CheckSize(int size) {
+@@ -163,7 +263,7 @@ void CKStateChunk::CheckSize(int size) {
          if (sz < 500)
              sz = 500;
          int newSize = m_ChunkParser->DataSize + sz;
@@ -391,7 +427,7 @@ index 2aebd3d..61f1897 100644
          if (m_Data) {
              memcpy(data, m_Data, m_ChunkParser->CurrentPos * sizeof(int));
              delete[] m_Data;
-@@ -182,7 +262,7 @@ void CKStateChunk::CloseChunk() {
+@@ -182,7 +282,7 @@ void CKStateChunk::CloseChunk() {
  
      if (m_ChunkSize > 0) {
          if (m_ChunkSize + 10 < m_ChunkParser->DataSize) {
@@ -400,7 +436,7 @@ index 2aebd3d..61f1897 100644
              if (m_Data) {
                  memcpy(data, m_Data, m_ChunkSize * sizeof(int));
                  delete[] m_Data;
-@@ -340,7 +420,7 @@ void CKStateChunk::AddChunk(CKStateChunk *chunk) {
+@@ -340,7 +440,7 @@ void CKStateChunk::AddChunk(CKStateChunk *chunk) {
      int j = m_ChunkParser->CurrentPos;
      if (m_Data[j + 1] != 0) {
          do {
@@ -409,7 +445,7 @@ index 2aebd3d..61f1897 100644
              j = *p + m_ChunkParser->CurrentPos;
              *p = j;
          } while (m_Data[j + 1] != 0);
-@@ -472,6 +552,7 @@ void CKStateChunk::WriteArray_LEndian(int elementCount, int elementSize, void *s
+@@ -472,6 +572,7 @@ void CKStateChunk::WriteArray_LEndian(int elementCount, int elementSize, void *s
  
          // Copy array data
          memcpy(&m_Data[m_ChunkParser->CurrentPos], srcData, totalBytes);
@@ -417,7 +453,7 @@ index 2aebd3d..61f1897 100644
          m_ChunkParser->CurrentPos += static_cast<int>(dwordCount);
      } else {
          // Write empty array marker
-@@ -482,20 +563,27 @@ void CKStateChunk::WriteArray_LEndian(int elementCount, int elementSize, void *s
+@@ -482,20 +583,27 @@ void CKStateChunk::WriteArray_LEndian(int elementCount, int elementSize, void *s
  }
  
  void CKStateChunk::WriteArray_LEndian16(int elementCount, int elementSize, void *srcData) {
@@ -447,7 +483,7 @@ index 2aebd3d..61f1897 100644
      m_ChunkParser->CurrentPos += 2;
      return m_Data[m_ChunkParser->CurrentPos++];
  }
-@@ -525,6 +613,7 @@ int CKStateChunk::ReadArray_LEndian(void **array) {
+@@ -525,6 +633,7 @@ int CKStateChunk::ReadArray_LEndian(void **array) {
              }
  
              memcpy(arrayData, &m_Data[parser->CurrentPos], dataSizeBytes);
@@ -455,7 +491,7 @@ index 2aebd3d..61f1897 100644
              // Update parser position
              parser->CurrentPos += dwordCount;
              *array = arrayData;
-@@ -542,7 +631,15 @@ int CKStateChunk::ReadArray_LEndian(void **array) {
+@@ -542,7 +651,15 @@ int CKStateChunk::ReadArray_LEndian(void **array) {
  }
  
  int CKStateChunk::ReadArray_LEndian16(void **array) {
@@ -472,7 +508,7 @@ index 2aebd3d..61f1897 100644
  }
  
  int CKStateChunk::ReadManagerIntSequence() {
-@@ -869,7 +966,7 @@ void CKStateChunk::WriteSubChunk(CKStateChunk *sub) {
+@@ -869,7 +986,7 @@ void CKStateChunk::WriteSubChunk(CKStateChunk *sub) {
          m_Data[m_ChunkParser->CurrentPos++] = (sub->m_Chunks) ? sub->m_Chunks->Size : 0;
          m_Data[m_ChunkParser->CurrentPos++] = (sub->m_Managers) ? sub->m_Managers->Size : 0;
          if (sub->m_ChunkSize != 0)
@@ -481,7 +517,7 @@ index 2aebd3d..61f1897 100644
          if (sub->m_Ids && sub->m_Ids->Size > 0)
              WriteBufferNoSize_LEndian(sub->m_Ids->Size * sizeof(int), sub->m_Ids->Data);
          if (sub->m_Chunks && sub->m_Chunks->Size > 0)
-@@ -919,7 +1016,7 @@ void CKStateChunk::WriteSubChunkSequence(CKStateChunk *sub) {
+@@ -919,7 +1036,7 @@ void CKStateChunk::WriteSubChunkSequence(CKStateChunk *sub) {
          m_Data[m_ChunkParser->CurrentPos++] = (sub->m_Chunks) ? sub->m_Chunks->Size : 0;
          m_Data[m_ChunkParser->CurrentPos++] = (sub->m_Managers) ? sub->m_Managers->Size : 0;
          if (sub->m_ChunkSize != 0)
@@ -490,7 +526,7 @@ index 2aebd3d..61f1897 100644
          if (sub->m_Ids && sub->m_Ids->Size > 0)
              WriteBufferNoSize_LEndian(sub->m_Ids->Size * sizeof(int), sub->m_Ids->Data);
          if (sub->m_Chunks && sub->m_Chunks->Size > 0)
-@@ -955,7 +1052,7 @@ CKStateChunk *CKStateChunk::ReadSubChunk() {
+@@ -955,7 +1072,7 @@ CKStateChunk *CKStateChunk::ReadSubChunk() {
          if (m_ChunkVersion > 4)
              managerCount = m_Data[m_ChunkParser->CurrentPos++];
          if (sub->m_ChunkSize != 0) {
@@ -499,7 +535,7 @@ index 2aebd3d..61f1897 100644
              if (!sub->m_Data) {
                  delete sub;
                  return nullptr;
-@@ -972,7 +1069,7 @@ CKStateChunk *CKStateChunk::ReadSubChunk() {
+@@ -972,7 +1089,7 @@ CKStateChunk *CKStateChunk::ReadSubChunk() {
                  delete sub;
                  return nullptr;
              }
@@ -508,7 +544,7 @@ index 2aebd3d..61f1897 100644
          }
  
          if (chunkCount > 0) {
-@@ -984,7 +1081,7 @@ CKStateChunk *CKStateChunk::ReadSubChunk() {
+@@ -984,7 +1101,7 @@ CKStateChunk *CKStateChunk::ReadSubChunk() {
                  delete sub;
                  return nullptr;
              }
@@ -517,7 +553,7 @@ index 2aebd3d..61f1897 100644
          }
  
          if (managerCount > 0) {
-@@ -996,7 +1093,7 @@ CKStateChunk *CKStateChunk::ReadSubChunk() {
+@@ -996,7 +1113,7 @@ CKStateChunk *CKStateChunk::ReadSubChunk() {
                  delete sub;
                  return nullptr;
              }
@@ -526,7 +562,7 @@ index 2aebd3d..61f1897 100644
          }
  
          if (hasFile && m_File)
-@@ -1008,7 +1105,7 @@ CKStateChunk *CKStateChunk::ReadSubChunk() {
+@@ -1008,7 +1125,7 @@ CKStateChunk *CKStateChunk::ReadSubChunk() {
          ++m_ChunkParser->CurrentPos;
          if (sub->m_ChunkSize == 0)
              return sub;
@@ -535,7 +571,7 @@ index 2aebd3d..61f1897 100644
          if (sub->m_Data) {
              memcpy(sub->m_Data, &m_Data[m_ChunkParser->CurrentPos], sub->m_ChunkSize * sizeof(int));
              m_ChunkParser->CurrentPos += sub->m_ChunkSize;
-@@ -1097,14 +1194,19 @@ float CKStateChunk::ReadFloat() {
+@@ -1097,14 +1214,19 @@ float CKStateChunk::ReadFloat() {
              m_File->m_Context->OutputToConsole("Chunk Read error");
          return 0;
      }
@@ -559,7 +595,7 @@ index 2aebd3d..61f1897 100644
      if (!buf) {
          // IDA: CheckSize(4) for null buffer
          CheckSize(sizeof(int));
-@@ -1119,14 +1221,12 @@ void CKStateChunk::WriteBuffer_LEndian(int size, void *buf) {
+@@ -1119,14 +1241,12 @@ void CKStateChunk::WriteBuffer_LEndian(int size, void *buf) {
  }
  
  void CKStateChunk::WriteBuffer_LEndian16(int size, void *buf) {
@@ -577,7 +613,7 @@ index 2aebd3d..61f1897 100644
      if (buf) {
          int sz = (size + 3) / sizeof(int);
          CheckSize(sz * sizeof(int));
-@@ -1135,8 +1235,16 @@ void CKStateChunk::WriteBufferNoSize_LEndian(int size, void *buf) {
+@@ -1135,8 +1255,16 @@ void CKStateChunk::WriteBufferNoSize_LEndian(int size, void *buf) {
      }
  }
  
@@ -595,7 +631,7 @@ index 2aebd3d..61f1897 100644
  }
  
  int CKStateChunk::ReadBuffer(void **buffer) {
-@@ -1168,11 +1276,25 @@ int CKStateChunk::ReadBuffer(void **buffer) {
+@@ -1168,11 +1296,25 @@ int CKStateChunk::ReadBuffer(void **buffer) {
      return 0;
  }
  
@@ -623,7 +659,7 @@ index 2aebd3d..61f1897 100644
      if (!m_ChunkParser || m_ChunkParser->CurrentPos >= m_ChunkSize) {
          if (m_File)
              m_File->m_Context->OutputToConsole("Chunk Read error");
-@@ -1199,14 +1321,21 @@ void CKStateChunk::ReadAndFillBuffer_LEndian(void *buffer) {
+@@ -1199,14 +1341,21 @@ void CKStateChunk::ReadAndFillBuffer_LEndian(void *buffer) {
  }
  
  void CKStateChunk::ReadAndFillBuffer_LEndian16(void *buffer) {
@@ -649,7 +685,7 @@ index 2aebd3d..61f1897 100644
      if (!m_ChunkParser || size < 0) {
          if (m_File)
              m_File->m_Context->OutputToConsole("Chunk Read error");
-@@ -1234,7 +1363,10 @@ void CKStateChunk::ReadAndFillBuffer_LEndian(int size, void *buffer) {
+@@ -1234,7 +1383,10 @@ void CKStateChunk::ReadAndFillBuffer_LEndian(int size, void *buffer) {
  }
  
  void CKStateChunk::ReadAndFillBuffer_LEndian16(int size, void *buffer) {
@@ -661,7 +697,7 @@ index 2aebd3d..61f1897 100644
  }
  
  void CKStateChunk::WriteString(CKSTRING str) {
-@@ -1310,6 +1442,7 @@ void CKStateChunk::ReadString(XString &str) {
+@@ -1310,6 +1462,7 @@ void CKStateChunk::ReadString(XString &str) {
  void CKStateChunk::WriteVector(const VxVector &v) {
      CheckSize(sizeof(VxVector));
      memcpy(&m_Data[m_ChunkParser->CurrentPos], &v, sizeof(VxVector));
@@ -669,7 +705,7 @@ index 2aebd3d..61f1897 100644
      m_ChunkParser->CurrentPos += sizeof(VxVector) / sizeof(int);
  }
  
-@@ -1327,6 +1460,7 @@ void CKStateChunk::ReadVector(VxVector &v) {
+@@ -1327,6 +1480,7 @@ void CKStateChunk::ReadVector(VxVector &v) {
      }
  
      memcpy(&v, &m_Data[m_ChunkParser->CurrentPos], sizeof(VxVector));
@@ -677,7 +713,7 @@ index 2aebd3d..61f1897 100644
      m_ChunkParser->CurrentPos += vectorInts;
  }
  
-@@ -1338,6 +1472,7 @@ void CKStateChunk::ReadVector(VxVector *v) {
+@@ -1338,6 +1492,7 @@ void CKStateChunk::ReadVector(VxVector *v) {
  void CKStateChunk::WriteMatrix(const VxMatrix &mat) {
      CheckSize(sizeof(VxMatrix));
      memcpy(&m_Data[m_ChunkParser->CurrentPos], &mat, sizeof(VxMatrix));
@@ -685,7 +721,7 @@ index 2aebd3d..61f1897 100644
      m_ChunkParser->CurrentPos += sizeof(VxMatrix) / sizeof(int);
  }
  
-@@ -1350,6 +1485,7 @@ void CKStateChunk::ReadMatrix(VxMatrix &mat) {
+@@ -1350,6 +1505,7 @@ void CKStateChunk::ReadMatrix(VxMatrix &mat) {
      }
  
      memcpy(&mat, &m_Data[m_ChunkParser->CurrentPos], sizeof(VxMatrix));
@@ -693,7 +729,7 @@ index 2aebd3d..61f1897 100644
      m_ChunkParser->CurrentPos += matrixInts;
  }
  
-@@ -1376,8 +1512,6 @@ int CKStateChunk::ConvertToBuffer(void *buffer) {
+@@ -1376,8 +1532,6 @@ int CKStateChunk::ConvertToBuffer(void *buffer) {
      }
  
      if (buffer) {
@@ -702,7 +738,7 @@ index 2aebd3d..61f1897 100644
          // Temporarily OR options/classID into version fields for serialization
          short savedChunkVersion = m_ChunkVersion;
          short savedDataVersion = m_DataVersion;
-@@ -1385,28 +1519,27 @@ int CKStateChunk::ConvertToBuffer(void *buffer) {
+@@ -1385,28 +1539,27 @@ int CKStateChunk::ConvertToBuffer(void *buffer) {
          m_DataVersion |= (m_ChunkClassID << 8);
  
          // Write header: [DataVersion | ChunkVersion<<16]
@@ -742,7 +778,7 @@ index 2aebd3d..61f1897 100644
              pos += m_Managers->Size;
          }
  
-@@ -1423,10 +1556,9 @@ CKBOOL CKStateChunk::ConvertFromBuffer(void *buffer) {
+@@ -1423,10 +1576,9 @@ CKBOOL CKStateChunk::ConvertFromBuffer(void *buffer) {
          return FALSE;
  
      int pos = 0;
@@ -754,7 +790,7 @@ index 2aebd3d..61f1897 100644
  
      // Extract raw version data - do NOT mask off high bytes yet
      // as VERSION3/4 formats encode options and classID in the high bytes
-@@ -1438,16 +1570,16 @@ CKBOOL CKStateChunk::ConvertFromBuffer(void *buffer) {
+@@ -1438,16 +1590,16 @@ CKBOOL CKStateChunk::ConvertFromBuffer(void *buffer) {
      m_ChunkVersion = (short) (rawChunkVersion & 0x00FF);
  
      if (m_ChunkVersion < CHUNK_VERSION2) {
@@ -777,7 +813,7 @@ index 2aebd3d..61f1897 100644
                  pos += m_ChunkSize;
              }
          }
-@@ -1458,7 +1590,7 @@ CKBOOL CKStateChunk::ConvertFromBuffer(void *buffer) {
+@@ -1458,7 +1610,7 @@ CKBOOL CKStateChunk::ConvertFromBuffer(void *buffer) {
              m_Ids->Size = idCount;
              m_Ids->Data = new int[idCount];
              if (m_Ids->Data) {
@@ -786,7 +822,7 @@ index 2aebd3d..61f1897 100644
                  pos += idCount;
              }
          }
-@@ -1469,7 +1601,7 @@ CKBOOL CKStateChunk::ConvertFromBuffer(void *buffer) {
+@@ -1469,7 +1621,7 @@ CKBOOL CKStateChunk::ConvertFromBuffer(void *buffer) {
              m_Chunks->Size = chunkCount;
              m_Chunks->Data = new int[chunkCount];
              if (m_Chunks->Data) {
@@ -795,7 +831,7 @@ index 2aebd3d..61f1897 100644
                  pos += chunkCount;
              }
          }
-@@ -1477,17 +1609,17 @@ CKBOOL CKStateChunk::ConvertFromBuffer(void *buffer) {
+@@ -1477,17 +1629,17 @@ CKBOOL CKStateChunk::ConvertFromBuffer(void *buffer) {
          m_File = nullptr;
          return TRUE;
      } else if (m_ChunkVersion == CHUNK_VERSION2) {
@@ -820,7 +856,7 @@ index 2aebd3d..61f1897 100644
                  pos += m_ChunkSize;
              }
          }
-@@ -1498,7 +1630,7 @@ CKBOOL CKStateChunk::ConvertFromBuffer(void *buffer) {
+@@ -1498,7 +1650,7 @@ CKBOOL CKStateChunk::ConvertFromBuffer(void *buffer) {
              m_Ids->Size = idCount;
              m_Ids->Data = new int[idCount];
              if (m_Ids->Data) {
@@ -829,7 +865,7 @@ index 2aebd3d..61f1897 100644
                  pos += idCount;
              }
          }
-@@ -1509,7 +1641,7 @@ CKBOOL CKStateChunk::ConvertFromBuffer(void *buffer) {
+@@ -1509,7 +1661,7 @@ CKBOOL CKStateChunk::ConvertFromBuffer(void *buffer) {
              m_Chunks->Size = chunkCount;
              m_Chunks->Data = new int[chunkCount];
              if (m_Chunks->Data) {
@@ -838,7 +874,7 @@ index 2aebd3d..61f1897 100644
                  pos += chunkCount;
              }
          }
-@@ -1520,7 +1652,7 @@ CKBOOL CKStateChunk::ConvertFromBuffer(void *buffer) {
+@@ -1520,7 +1672,7 @@ CKBOOL CKStateChunk::ConvertFromBuffer(void *buffer) {
              m_Managers->Size = managerCount;
              m_Managers->Data = new int[managerCount];
              if (m_Managers->Data) {
@@ -847,7 +883,7 @@ index 2aebd3d..61f1897 100644
                  pos += managerCount;
              }
          }
-@@ -1535,11 +1667,11 @@ CKBOOL CKStateChunk::ConvertFromBuffer(void *buffer) {
+@@ -1535,11 +1687,11 @@ CKBOOL CKStateChunk::ConvertFromBuffer(void *buffer) {
          CKBYTE chunkOptions = (rawChunkVersion & 0xFF00) >> 8;
          m_ChunkClassID = (rawDataVersion & 0xFF00) >> 8;
  
@@ -862,7 +898,7 @@ index 2aebd3d..61f1897 100644
                  pos += m_ChunkSize;
              }
          }
-@@ -1548,42 +1680,42 @@ CKBOOL CKStateChunk::ConvertFromBuffer(void *buffer) {
+@@ -1548,42 +1700,42 @@ CKBOOL CKStateChunk::ConvertFromBuffer(void *buffer) {
              m_File = nullptr;
  
          if ((chunkOptions & CHNK_OPTION_IDS) != 0) {
@@ -911,7 +947,7 @@ index 2aebd3d..61f1897 100644
                      pos += managerCount;
                  }
              }
-@@ -1776,19 +1908,17 @@ void CKStateChunk::WriteReaderBitmap(const VxImageDescEx &desc, CKBitmapReader *
+@@ -1776,19 +1928,17 @@ void CKStateChunk::WriteReaderBitmap(const VxImageDescEx &desc, CKBitmapReader *
  
      if (alphaIsSaved || !desc.AlphaMask) {
          WriteDword(1);
@@ -935,7 +971,7 @@ index 2aebd3d..61f1897 100644
  
      CKBYTE alphaHistogram[256];
      memset(alphaHistogram, 0, sizeof(alphaHistogram));
-@@ -1804,7 +1934,7 @@ void CKStateChunk::WriteReaderBitmap(const VxImageDescEx &desc, CKBitmapReader *
+@@ -1804,7 +1954,7 @@ void CKStateChunk::WriteReaderBitmap(const VxImageDescEx &desc, CKBitmapReader *
      CKBYTE *pixelCursor = desc.Image;
      const int lutShift = static_cast<int>(g_AlphaShift_LSB) - static_cast<int>(g_AlphaQuantShift_MSB);
      while (totalDwords-- > 0) {
@@ -944,7 +980,7 @@ index 2aebd3d..61f1897 100644
          CKBYTE histogramIndex = static_cast<CKBYTE>((packedPixel & alphaMask) >> lutShift);
          alphaHistogram[histogramIndex] = 1;
          pixelCursor += bytesPerPixel;
-@@ -1833,7 +1963,7 @@ void CKStateChunk::WriteReaderBitmap(const VxImageDescEx &desc, CKBitmapReader *
+@@ -1833,7 +1983,7 @@ void CKStateChunk::WriteReaderBitmap(const VxImageDescEx &desc, CKBitmapReader *
              CKBYTE *srcRow = desc.Image;
              for (int y = 0; y < desc.Height; ++y) {
                  CKBYTE *dst = alphaPlane + static_cast<size_t>(y) * desc.Width;
@@ -953,7 +989,7 @@ index 2aebd3d..61f1897 100644
                  for (int x = 0; x < desc.Width; ++x) {
                      dst[x] = *src;
                      src += bytesPerPixel;
-@@ -1846,18 +1976,17 @@ void CKStateChunk::WriteReaderBitmap(const VxImageDescEx &desc, CKBitmapReader *
+@@ -1846,18 +1996,17 @@ void CKStateChunk::WriteReaderBitmap(const VxImageDescEx &desc, CKBitmapReader *
                  CKBYTE *dst = alphaPlane + static_cast<size_t>(y) * desc.Width;
                  CKBYTE *src = srcRow;
                  for (int x = 0; x < desc.Width; ++x) {
@@ -975,7 +1011,7 @@ index 2aebd3d..61f1897 100644
      }
  
      reader->ReleaseMemory(savedBuffer);
-@@ -1870,7 +1999,7 @@ CKBOOL CKStateChunk::ReadReaderBitmap(const VxImageDescEx &desc) {
+@@ -1870,7 +2019,7 @@ CKBOOL CKStateChunk::ReadReaderBitmap(const VxImageDescEx &desc) {
  
      CKFileExtension ext;
      memset(ext.m_Data, 0, sizeof(ext.m_Data));
@@ -984,7 +1020,7 @@ index 2aebd3d..61f1897 100644
      CKGUID readerGuid = ReadGuid();
  
      CKBitmapReader *reader = CKGetPluginManager()->GetBitmapReader(ext, &readerGuid);
-@@ -1955,10 +2084,10 @@ void CKStateChunk::WriteRawBitmap(const VxImageDescEx &desc) {
+@@ -1955,10 +2104,10 @@ void CKStateChunk::WriteRawBitmap(const VxImageDescEx &desc) {
          delete[] greenPlane;
          delete[] redPlane;
          delete[] alphaPlane;
@@ -999,7 +1035,7 @@ index 2aebd3d..61f1897 100644
          return;
      }
  
-@@ -1974,10 +2103,10 @@ void CKStateChunk::WriteRawBitmap(const VxImageDescEx &desc) {
+@@ -1974,10 +2123,10 @@ void CKStateChunk::WriteRawBitmap(const VxImageDescEx &desc) {
              for (int remaining = height; remaining > 0; --remaining) {
                  const CKBYTE *pixel = scanline;
                  for (int x = 0; x < width; ++x) {
@@ -1014,7 +1050,7 @@ index 2aebd3d..61f1897 100644
                      pixel += bytesPerPixel;
                  }
                  scanline -= desc.BytesPerLine;
-@@ -1986,9 +2115,9 @@ void CKStateChunk::WriteRawBitmap(const VxImageDescEx &desc) {
+@@ -1986,9 +2135,9 @@ void CKStateChunk::WriteRawBitmap(const VxImageDescEx &desc) {
              for (int remaining = height; remaining > 0; --remaining) {
                  const CKBYTE *pixel = scanline;
                  for (int x = 0; x < width; ++x) {
@@ -1027,7 +1063,7 @@ index 2aebd3d..61f1897 100644
                      pixel += bytesPerPixel;
                  }
                  scanline -= desc.BytesPerLine;
-@@ -2008,8 +2137,7 @@ void CKStateChunk::WriteRawBitmap(const VxImageDescEx &desc) {
+@@ -2008,8 +2157,7 @@ void CKStateChunk::WriteRawBitmap(const VxImageDescEx &desc) {
          for (int remaining = height; remaining > 0; --remaining) {
              const CKBYTE *pixel = scanline;
              for (int x = 0; x < width; ++x) {
@@ -1037,7 +1073,7 @@ index 2aebd3d..61f1897 100644
                  *blueOut++ = static_cast<CKBYTE>(((sample & desc.BlueMask) >> blueLsb) << blueQuant);
                  *greenOut++ = static_cast<CKBYTE>(((sample & desc.GreenMask) >> greenLsb) << greenQuant);
                  *redOut++ = static_cast<CKBYTE>(((sample & desc.RedMask) >> redLsb) << redQuant);
-@@ -2064,19 +2192,19 @@ void CKStateChunk::WriteRawBitmap(const VxImageDescEx &desc) {
+@@ -2064,19 +2212,19 @@ void CKStateChunk::WriteRawBitmap(const VxImageDescEx &desc) {
  
      if (compressionUsed) {
          m_Data[compressionFlagPos] = 1;
@@ -1065,7 +1101,7 @@ index 2aebd3d..61f1897 100644
      }
  
      delete[] encodedBlue;
-@@ -2195,19 +2323,21 @@ CKBYTE *CKStateChunk::ReadRawBitmap(VxImageDescEx &desc) {
+@@ -2195,19 +2343,21 @@ CKBYTE *CKStateChunk::ReadRawBitmap(VxImageDescEx &desc) {
          if (alpha) {
              for (int y = 0; y < rows; ++y) {
                  for (int x = 0; x < columns; ++x) {
@@ -1095,7 +1131,7 @@ index 2aebd3d..61f1897 100644
                  }
              }
          }
-@@ -2476,7 +2606,7 @@ void CKStateChunk::Pack(int CompressionLevel) {
+@@ -2476,7 +2626,7 @@ void CKStateChunk::Pack(int CompressionLevel) {
          if (data) {
              memcpy(data, buf, destSize);
              delete[] m_Data;
@@ -1104,7 +1140,7 @@ index 2aebd3d..61f1897 100644
              // IDA stores raw byte size, not DWORD count
              m_ChunkSize = destSize;
          }
-@@ -2503,7 +2633,7 @@ CKBOOL CKStateChunk::UnPack(int DestSize) {
+@@ -2503,7 +2653,7 @@ CKBOOL CKStateChunk::UnPack(int DestSize) {
  
      // Store as DWORD count after decompression
      const int newChunkSize = DestSize >> 2;
@@ -1113,7 +1149,7 @@ index 2aebd3d..61f1897 100644
      if (!data) {
          delete[] buf;
          return FALSE;
-@@ -2544,9 +2674,10 @@ void CKStateChunk::AttributePatch(CKBOOL preserveData, int *ConversionTable, int
+@@ -2544,9 +2694,10 @@ void CKStateChunk::AttributePatch(CKBOOL preserveData, int *ConversionTable, int
      if (ConversionTable && NbEntries > 0 && sequenceCount > 0) {
          int remaining = sequenceCount;
          while (remaining-- > 0) {
@@ -1127,7 +1163,7 @@ index 2aebd3d..61f1897 100644
              m_ChunkParser->CurrentPos++;
          }
      }
-@@ -2569,9 +2700,9 @@ int CKStateChunk::IterateAndDo(ChunkIterateFct fct, ChunkIteratorData *it) {
+@@ -2569,9 +2720,9 @@ int CKStateChunk::IterateAndDo(ChunkIterateFct fct, ChunkIteratorData *it) {
          ChunkIteratorData child;
          child.CopyFctData(it);
  
@@ -1139,7 +1175,7 @@ index 2aebd3d..61f1897 100644
              const int blockSize = data[entry];
              if (blockSize > 0 && data[entry + 2] + 4 != blockSize) {
                  child.ChunkVersion = static_cast<short>(data[entry + 2] >> 16);
-@@ -2589,7 +2720,7 @@ int CKStateChunk::IterateAndDo(ChunkIterateFct fct, ChunkIteratorData *it) {
+@@ -2589,7 +2740,7 @@ int CKStateChunk::IterateAndDo(ChunkIterateFct fct, ChunkIteratorData *it) {
                  child.ManagerCount = managerCount;
  
                  child.Data = &data[payloadOffset];
@@ -1148,7 +1184,7 @@ index 2aebd3d..61f1897 100644
  
                  child.Ids = (child.IdCount > 0) ? cursor : nullptr;
                  cursor += child.IdCount;
-@@ -2612,13 +2743,13 @@ int CKStateChunk::IterateAndDo(ChunkIterateFct fct, ChunkIteratorData *it) {
+@@ -2612,13 +2763,13 @@ int CKStateChunk::IterateAndDo(ChunkIterateFct fct, ChunkIteratorData *it) {
          if (chunkIndex >= it->ChunkCount)
              break;
  
@@ -1164,7 +1200,7 @@ index 2aebd3d..61f1897 100644
          int packedCount = data[sequenceOffset];
          int cursor = sequenceOffset + 1;
  
-@@ -2654,7 +2785,7 @@ int CKStateChunk::IterateAndDo(ChunkIterateFct fct, ChunkIteratorData *it) {
+@@ -2654,7 +2805,7 @@ int CKStateChunk::IterateAndDo(ChunkIterateFct fct, ChunkIteratorData *it) {
              child.ManagerCount = managerCount;
  
              child.Data = &data[payloadOffset];
@@ -1173,7 +1209,7 @@ index 2aebd3d..61f1897 100644
  
              child.Ids = (child.IdCount > 0) ? packedCursor : nullptr;
              packedCursor += child.IdCount;
-@@ -2704,12 +2835,14 @@ int CKStateChunk::ObjectRemapper(ChunkIteratorData *it) {
+@@ -2704,12 +2855,14 @@ int CKStateChunk::ObjectRemapper(ChunkIteratorData *it) {
              return 0;
  
          for (int idx = 0; idx < it->IdCount;) {
@@ -1191,7 +1227,7 @@ index 2aebd3d..61f1897 100644
                  }
                  ++idx;
                  continue;
-@@ -2719,7 +2852,7 @@ int CKStateChunk::ObjectRemapper(ChunkIteratorData *it) {
+@@ -2719,7 +2872,7 @@ int CKStateChunk::ObjectRemapper(ChunkIteratorData *it) {
              if (idx >= it->IdCount)
                  break;
  
@@ -1200,7 +1236,7 @@ index 2aebd3d..61f1897 100644
              if (sequenceOffset < 0 || sequenceOffset >= it->ChunkSize) {
                  ++idx;
                  continue;
-@@ -2730,9 +2863,11 @@ int CKStateChunk::ObjectRemapper(ChunkIteratorData *it) {
+@@ -2730,9 +2883,11 @@ int CKStateChunk::ObjectRemapper(ChunkIteratorData *it) {
              const int lastEntry = firstEntry + count;
              if (count > 0 && lastEntry <= it->ChunkSize) {
                  for (int cursor = firstEntry; cursor < lastEntry; ++cursor) {
@@ -1214,7 +1250,7 @@ index 2aebd3d..61f1897 100644
                  }
              }
  
-@@ -2748,9 +2883,11 @@ int CKStateChunk::ObjectRemapper(ChunkIteratorData *it) {
+@@ -2748,9 +2903,11 @@ int CKStateChunk::ObjectRemapper(ChunkIteratorData *it) {
          if (it->Data[pos - 3] == OBJID_MARKER[0] &&
              it->Data[pos - 2] == OBJID_MARKER[1] &&
              it->Data[pos - 1] == OBJID_MARKER[2]) {
@@ -1228,7 +1264,7 @@ index 2aebd3d..61f1897 100644
          }
      }
  
-@@ -2767,9 +2904,11 @@ int CKStateChunk::ObjectRemapper(ChunkIteratorData *it) {
+@@ -2767,9 +2924,11 @@ int CKStateChunk::ObjectRemapper(ChunkIteratorData *it) {
                      const int lastEntry = firstEntry + count;
                      if (lastEntry <= it->ChunkSize) {
                          for (int cursor = firstEntry; cursor < lastEntry; ++cursor) {
@@ -1242,7 +1278,7 @@ index 2aebd3d..61f1897 100644
                          }
                      }
                  }
-@@ -2786,12 +2925,12 @@ int CKStateChunk::ManagerRemapper(ChunkIteratorData *it) {
+@@ -2786,12 +2945,12 @@ int CKStateChunk::ManagerRemapper(ChunkIteratorData *it) {
  
      int total = 0;
      for (int idx = 0; idx < it->ManagerCount;) {
@@ -1257,7 +1293,7 @@ index 2aebd3d..61f1897 100644
                      if (value >= 0 && value < it->NbEntries) {
                          int mapped = it->ConversionTable[value];
                          if (mapped != value) {
-@@ -2809,7 +2948,7 @@ int CKStateChunk::ManagerRemapper(ChunkIteratorData *it) {
+@@ -2809,7 +2968,7 @@ int CKStateChunk::ManagerRemapper(ChunkIteratorData *it) {
          if (idx >= it->ManagerCount)
              break;
  
@@ -1266,7 +1302,7 @@ index 2aebd3d..61f1897 100644
          if (sequenceOffset < 0 || sequenceOffset + 2 >= it->ChunkSize) {
              ++idx;
              continue;
-@@ -2827,7 +2966,7 @@ int CKStateChunk::ManagerRemapper(ChunkIteratorData *it) {
+@@ -2827,7 +2986,7 @@ int CKStateChunk::ManagerRemapper(ChunkIteratorData *it) {
              const int endValue = firstValue + count;
              if (endValue <= it->ChunkSize) {
                  for (int cursor = firstValue; cursor < endValue; ++cursor) {
@@ -1275,7 +1311,7 @@ index 2aebd3d..61f1897 100644
                      if (value >= 0 && value < it->NbEntries) {
                          int mapped = it->ConversionTable[value];
                          if (mapped != value) {
-@@ -2857,9 +2996,10 @@ int CKStateChunk::ParameterRemapper(ChunkIteratorData *it) {
+@@ -2857,9 +3016,10 @@ int CKStateChunk::ParameterRemapper(ChunkIteratorData *it) {
                  CKGUID storedGuid(it->Data[headerStart], it->Data[headerStart + 1]);
                  if (storedGuid == it->Guid && it->Data[headerStart + 2] == 1) {
                      // GUID, storage kind and buffer byte count precede the value.
