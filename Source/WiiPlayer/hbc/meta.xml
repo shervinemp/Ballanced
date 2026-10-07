@@ -8,5 +8,5 @@
 
 Copy base.cmo, Database.tdb and the 3D Entities, Sounds, Textures and Text folders from your own Ballance installation into this folder.
 
-Controls: hold the Wii Remote sideways (D-Pad moves the ball, 1 rotates the camera, 2 lifts the camera, + pauses), or use a Nunchuk, Classic Controller or GameCube controller. Point at the screen and press A in menus. HOME opens the HOME menu.</long_description>
+Controls: hold the Wii Remote sideways (D-Pad moves the ball, 1 rotates the camera, 2 lifts the camera, + pauses), or use a Nunchuk, Classic Controller or GameCube controller. Point at the screen and press A in menus. An on-screen keyboard appears when the game asks for a name. HOME opens the HOME menu.</long_description>
 </app>
