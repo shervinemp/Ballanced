@@ -242,6 +242,29 @@ index 0947ac6..23bc21c 100644
  
      m_Crypted = crypted;
      return true;
+diff --git a/TT_Gravity_RT/Behaviors/TextureSine.cpp b/TT_Gravity_RT/Behaviors/TextureSine.cpp
+index f794953..ffc8576 100644
+--- a/TT_Gravity_RT/Behaviors/TextureSine.cpp
++++ b/TT_Gravity_RT/Behaviors/TextureSine.cpp
+@@ -122,6 +122,18 @@ CKERROR TextureSineCallBack(const CKBehaviorContext &behcontext)
+ 
+     switch (behcontext.CallbackMessage)
+     {
++#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
++    case CKM_BEHAVIORLOAD:
++    {
++        // The saved UVs are a raw buffer, which files store little-endian.
++        CKParameterLocal *saved = beh->GetLocalParameter(0);
++        CKDWORD *words = saved ? (CKDWORD *)saved->GetWriteDataPtr() : NULL;
++        const int count = words ? saved->GetDataSize() / (int)sizeof(CKDWORD) : 0;
++        for (int i = 0; i < count; i++)
++            ENDIANSWAP32(words[i]);
++    }
++    break;
++#endif
+     case CKM_BEHAVIORATTACH:
+     {
+         // we get the mesh vertices
 diff --git a/TT_Toolbox_RT/Behaviors/HighMapMeshform.cpp b/TT_Toolbox_RT/Behaviors/HighMapMeshform.cpp
 index 30a5386..698ffa4 100644
 --- a/TT_Toolbox_RT/Behaviors/HighMapMeshform.cpp

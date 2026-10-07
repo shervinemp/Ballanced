@@ -293,13 +293,24 @@ function(ballance_wii_port_building_blocks)
             FILES Materials-Textures/Behaviors/TextureSinus.cpp
             TARGETS MaterialsStatic
     )
-    # Font manager chunks, the little-endian Database.tdb file and pixel bytes.
+    # Font manager chunks, the little-endian Database.tdb file, pixel bytes and
+    # raw buffers that blocks save in files.
     ballance_wii_patch(BuildingBlocksEndian
             ROOT "${_root}"
             PATCH "${BALLANCE_WII_PATCH_DIR}/BuildingBlocks/big-endian.patch"
             FILES Interface/CKFontManager.cpp TT_DatabaseManager_RT/DatabaseManager.cpp
                   TT_Toolbox_RT/Behaviors/HighMapMeshform.cpp BuildingBlocksAddons1/Behaviors/CombineTexture.cpp
+                  TT_Gravity_RT/Behaviors/TextureSine.cpp
             TARGETS InterfaceStatic TT_DatabaseManager_RTStatic TT_Toolbox_RTStatic BuildingBlocksAddons1Static
+                    TT_Gravity_RTStatic
+    )
+    # Unlimited Controller keeps -1 in plain chars (unsigned on PowerPC), and
+    # its load-time swap must swap a float/int union once.
+    ballance_wii_patch(Characters
+            ROOT "${_root}"
+            PATCH "${BALLANCE_WII_PATCH_DIR}/BuildingBlocks/unlimited-controller.patch"
+            FILES Characters/Behaviors/UnlimitedParams.h Characters/Behaviors/UnlimitedController.cpp
+            TARGETS CharactersStatic
     )
     # No system fonts: TrueType fonts are looked up in a Fonts folder next to the game.
     ballance_wii_patch(InterfaceFonts

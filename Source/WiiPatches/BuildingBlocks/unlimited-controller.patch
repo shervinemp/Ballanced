@@ -1,0 +1,35 @@
+diff --git a/Characters/Behaviors/UnlimitedController.cpp b/Characters/Behaviors/UnlimitedController.cpp
+index 88b7aa5..238c758 100644
+--- a/Characters/Behaviors/UnlimitedController.cpp
++++ b/Characters/Behaviors/UnlimitedController.cpp
+@@ -238,7 +238,7 @@ CKERROR DaUCharacterCB(const CKBehaviorContext &behcontext)
+                     // Do Swap For Mac
+ #if !defined(WIN32) && !defined(_WIN32)
+                     ENDIANSWAP32(params[i].IndexAnimation);
+-                    ENDIANSWAP32(params[i].StartFrame);
++                    // StartFrame and Priority share one word.
+                     ENDIANSWAP32(params[i].Priority);
+ 
+                     ENDIANSWAP16(params[i].Align);
+@@ -288,7 +288,7 @@ CKERROR DaUCharacterCB(const CKBehaviorContext &behcontext)
+                     // Do Swap For Mac
+ #if !defined(WIN32) && !defined(_WIN32)
+                     ENDIANSWAP32(params[i].IndexAnimation);
+-                    ENDIANSWAP32(params[i].StartFrame);
++                    // StartFrame and Priority share one word.
+                     ENDIANSWAP32(params[i].Priority);
+ 
+                     ENDIANSWAP16(params[i].Align);
+diff --git a/Characters/Behaviors/UnlimitedParams.h b/Characters/Behaviors/UnlimitedParams.h
+index 1eb79c1..5084b32 100644
+--- a/Characters/Behaviors/UnlimitedParams.h
++++ b/Characters/Behaviors/UnlimitedParams.h
+@@ -58,7 +58,7 @@ typedef struct UnlimitedParam {
+ 				CKAnimation* AnimationPtr;
+ 				CKWORD  Align;
+ 				CKWORD  ParameterMask;	 
+-				char  ParameterIndexes[16];	// Index of linked input parameter
++				signed char  ParameterIndexes[16];	// Index of linked input parameter, -1 for none
+ 				char Message[64];
+ 				int  Msg;
+ 				float fps;
