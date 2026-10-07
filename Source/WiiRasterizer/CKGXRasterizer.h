@@ -181,6 +181,7 @@ private:
     // Video
     void InitVideo();
     void CopyToScreen();
+    void DrawOverlay();
     void DrawPointer();
 
     // State translation (CKGXState.cpp)

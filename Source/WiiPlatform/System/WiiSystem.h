@@ -58,6 +58,34 @@ namespace wiisystem
     // shows its cursor and a Wii Remote points at the screen.
     void SetPointer(bool visible, float x, float y, float angle);
     bool GetPointer(float *x, float *y, float *angle);
+
+    // System screens drawn over the game picture (on-screen keyboard, HOME
+    // menu): boxes with optional centered text, in render pixels, drawn in
+    // order below the pointer. Colors are 0xRRGGBBAA; alpha 0 skips a part.
+    struct OverlayItem
+    {
+        float X0, Y0, X1, Y1;
+        u32 Fill;
+        u32 Border;
+        u32 TextColor;
+        float TextScale; // 1 draws 8x16 pixel characters
+        char Text[40];
+    };
+
+    enum OverlayLayer
+    {
+        OVERLAY_KEYBOARD = 0, // Owned by the input manager
+        OVERLAY_HOME_MENU,    // Owned by the HOME menu
+        OVERLAY_LAYER_COUNT
+    };
+
+    // Replaces a layer's items (count 0 hides it).
+    void SetOverlay(OverlayLayer layer, const OverlayItem *items, int count);
+    int GetOverlay(OverlayLayer layer, const OverlayItem **items);
+
+    // Fills an item; text may be NULL.
+    OverlayItem MakeOverlayItem(float x0, float y0, float x1, float y1, u32 fill, u32 border,
+                                const char *text = NULL, u32 textColor = 0xFFFFFFFF, float textScale = 1.0f);
 }
 
 #endif // BALLANCE_WII_SYSTEM_H

@@ -4,11 +4,58 @@
 
 #include "WiiSystem.h"
 
+#include <malloc.h>
 #include <math.h>
 #include <string.h>
 
+// libogc's console font: 256 characters of 8x16 pixels, one byte per row,
+// leftmost pixel in the top bit.
+extern "C" u8 console_font_8x16[];
+
 namespace
 {
+    // Printable ASCII (32..127) from the console font, 16 characters per row
+    // of a 128x96 intensity texture.
+    const int kFontColumns = 16;
+    const int kFontWidth = kFontColumns * 8;
+    const int kFontHeight = 6 * 16;
+
+    u8 *OverlayFont()
+    {
+        static u8 *s_Font = NULL;
+        if (s_Font)
+            return s_Font;
+        s_Font = (u8 *)memalign(32, kFontWidth * kFontHeight);
+        if (!s_Font)
+            return NULL;
+        for (int y = 0; y < kFontHeight; ++y)
+        {
+            for (int x = 0; x < kFontWidth; ++x)
+            {
+                const int c = 32 + (y / 16) * kFontColumns + x / 8;
+                const bool set = (console_font_8x16[c * 16 + y % 16] & (0x80 >> (x % 8))) != 0;
+                // I8 textures are stored in 8x4 tiles.
+                const int tile = (y / 4) * (kFontWidth / 8) + x / 8;
+                s_Font[tile * 32 + (y % 4) * 8 + x % 8] = set ? 0xFF : 0x00;
+            }
+        }
+        DCFlushRange(s_Font, kFontWidth * kFontHeight);
+        return s_Font;
+    }
+
+    void OverlayQuad(float x0, float y0, float x1, float y1, u32 color)
+    {
+        GX_Begin(GX_QUADS, GX_VTXFMT0, 4);
+        GX_Position3f32(x0, y0, 0.0f);
+        GX_Color1u32(color);
+        GX_Position3f32(x1, y0, 0.0f);
+        GX_Color1u32(color);
+        GX_Position3f32(x1, y1, 0.0f);
+        GX_Color1u32(color);
+        GX_Position3f32(x0, y1, 0.0f);
+        GX_Color1u32(color);
+        GX_End();
+    }
     u8 GXPrimitive(VXPRIMITIVETYPE type)
     {
         switch (type)
@@ -280,6 +327,107 @@ void CKGXRasterizerContext::DrawScreenQuad(float x0, float y0, float x1, float y
     GX_End();
 
     GX_SetColorUpdate(GX_TRUE);
+}
+
+// System screens over the picture: the on-screen keyboard and the HOME menu.
+void CKGXRasterizerContext::DrawOverlay()
+{
+    int total = 0;
+    for (int layer = 0; layer < wiisystem::OVERLAY_LAYER_COUNT; ++layer)
+        total += wiisystem::GetOverlay((wiisystem::OverlayLayer)layer, NULL);
+    u8 *font = total > 0 ? OverlayFont() : NULL;
+    if (!font)
+        return;
+
+    GX_SetViewport(0.0f, 0.0f, (f32)m_Width, (f32)m_Height, 0.0f, 1.0f);
+    GX_SetScissor(0, 0, m_Width, m_Height);
+    ApplyTransforms(TRUE);
+    GX_SetNumChans(1);
+    GX_SetChanCtrl(GX_COLOR0A0, GX_DISABLE, GX_SRC_REG, GX_SRC_VTX, GX_LIGHTNULL, GX_DF_NONE, GX_AF_NONE);
+    GX_SetNumTevStages(1);
+    GX_SetZMode(GX_FALSE, GX_ALWAYS, GX_FALSE);
+    GX_SetAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0);
+    GX_SetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_CLEAR);
+    GX_SetColorUpdate(GX_TRUE);
+    GX_SetCullMode(GX_CULL_NONE);
+    GXColor none = {0, 0, 0, 0};
+    GX_SetFog(GX_FOG_NONE, 0.0f, 1.0f, 0.1f, 1.0f, none);
+
+    GXTexObj fontObject;
+    GX_InitTexObj(&fontObject, font, kFontWidth, kFontHeight, GX_TF_I8, GX_CLAMP, GX_CLAMP, GX_FALSE);
+    GX_InitTexObjLOD(&fontObject, GX_NEAR, GX_NEAR, 0.0f, 0.0f, 0.0f, GX_FALSE, GX_FALSE, GX_ANISO_1);
+    GX_LoadTexObj(&fontObject, GX_TEXMAP0);
+    GX_SetTexCoordGen(GX_TEXCOORD0, GX_TG_MTX2x4, GX_TG_TEX0, GX_IDENTITY);
+
+    for (int layer = 0; layer < wiisystem::OVERLAY_LAYER_COUNT; ++layer)
+    {
+        const wiisystem::OverlayItem *items = NULL;
+        const int count = wiisystem::GetOverlay((wiisystem::OverlayLayer)layer, &items);
+        for (int i = 0; i < count; ++i)
+        {
+            const wiisystem::OverlayItem &item = items[i];
+
+            // Box: fill, then a two-pixel border.
+            GX_SetNumTexGens(0);
+            GX_SetTevOrder(GX_TEVSTAGE0, GX_TEXCOORDNULL, GX_TEXMAP_NULL, GX_COLOR0A0);
+            GX_SetTevOp(GX_TEVSTAGE0, GX_PASSCLR);
+            GX_ClearVtxDesc();
+            GX_SetVtxDesc(GX_VA_POS, GX_DIRECT);
+            GX_SetVtxDesc(GX_VA_CLR0, GX_DIRECT);
+            GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_F32, 0);
+            GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_CLR_RGBA, GX_RGBA8, 0);
+            if (item.Fill & 0xFF)
+                OverlayQuad(item.X0, item.Y0, item.X1, item.Y1, item.Fill);
+            if (item.Border & 0xFF)
+            {
+                const float b = 2.0f;
+                OverlayQuad(item.X0, item.Y0, item.X1, item.Y0 + b, item.Border);
+                OverlayQuad(item.X0, item.Y1 - b, item.X1, item.Y1, item.Border);
+                OverlayQuad(item.X0, item.Y0 + b, item.X0 + b, item.Y1 - b, item.Border);
+                OverlayQuad(item.X1 - b, item.Y0 + b, item.X1, item.Y1 - b, item.Border);
+            }
+
+            // Text, centered: the glyph texture's intensity is the coverage.
+            const int length = (int)strnlen(item.Text, sizeof(item.Text));
+            if (length == 0 || !(item.TextColor & 0xFF))
+                continue;
+            GX_SetNumTexGens(1);
+            GX_SetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR0A0);
+            GX_SetTevOp(GX_TEVSTAGE0, GX_MODULATE);
+            GX_SetVtxDesc(GX_VA_TEX0, GX_DIRECT);
+            GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_TEX_ST, GX_F32, 0);
+
+            const float scale = item.TextScale > 0.0f ? item.TextScale : 1.0f;
+            const float cw = 8.0f * scale;
+            const float ch = 16.0f * scale;
+            float x = floorf((item.X0 + item.X1 - length * cw) * 0.5f);
+            const float y = floorf((item.Y0 + item.Y1 - ch) * 0.5f);
+            GX_Begin(GX_QUADS, GX_VTXFMT0, (u16)(length * 4));
+            for (int c = 0; c < length; ++c, x += cw)
+            {
+                int glyph = (u8)item.Text[c] - 32;
+                if (glyph < 0 || glyph >= kFontColumns * 6)
+                    glyph = '?' - 32;
+                const float u0 = (float)(glyph % kFontColumns * 8) / kFontWidth;
+                const float v0 = (float)(glyph / kFontColumns * 16) / kFontHeight;
+                const float u1 = u0 + 8.0f / kFontWidth;
+                const float v1 = v0 + 16.0f / kFontHeight;
+                GX_Position3f32(x, y, 0.0f);
+                GX_Color1u32(item.TextColor);
+                GX_TexCoord2f32(u0, v0);
+                GX_Position3f32(x + cw, y, 0.0f);
+                GX_Color1u32(item.TextColor);
+                GX_TexCoord2f32(u1, v0);
+                GX_Position3f32(x + cw, y + ch, 0.0f);
+                GX_Color1u32(item.TextColor);
+                GX_TexCoord2f32(u1, v1);
+                GX_Position3f32(x, y + ch, 0.0f);
+                GX_Color1u32(item.TextColor);
+                GX_TexCoord2f32(u0, v1);
+            }
+            GX_End();
+        }
+    }
 }
 
 // The Wii Remote pointer, drawn over the picture while the game shows its cursor.

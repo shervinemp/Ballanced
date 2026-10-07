@@ -5,6 +5,7 @@
 
 #include "CKRasterizer.h"
 #include "VxMath.h"
+#include "WiiSystem.h"
 
 #include <gccore.h>
 #include <stdlib.h>
@@ -545,6 +546,50 @@ namespace
         EXPECT_PIXEL(ctx, 150, 202, 0, 0, 0, "screen-space quad bottom edge");
     }
 
+    // System screens over the picture: filled and outlined boxes, see-through
+    // fills and centered text from the console font.
+    void TestOverlay(CKRasterizerContext *ctx)
+    {
+        wiisystem::OverlayItem items[3];
+        items[0] = wiisystem::MakeOverlayItem(100, 100, 300, 200, 0x0000FFFF, 0x00FF00FF);
+        items[1] = wiisystem::MakeOverlayItem(400, 100, 560, 228, 0, 0, "W", 0xFFFFFFFF, 4.0f);
+        items[2] = wiisystem::MakeOverlayItem(100, 300, 300, 400, 0x00000080, 0);
+        wiisystem::SetOverlay(wiisystem::OVERLAY_HOME_MENU, items, 3);
+        BeginFrame(ctx, 0xFFFF0000);
+        EndFrame(ctx);
+        wiisystem::SetOverlay(wiisystem::OVERLAY_HOME_MENU, NULL, 0);
+
+        EXPECT_PIXEL(ctx, 200, 150, 0, 0, 255, "overlay fill");
+        EXPECT_PIXEL(ctx, 100, 150, 0, 255, 0, "overlay border");
+        EXPECT_PIXEL(ctx, 50, 50, 255, 0, 0, "outside the overlay");
+        EXPECT_PIXEL(ctx, 200, 350, 127, 0, 0, "half-transparent fill");
+
+        // "W" at four times 8x16, centered: 32x64 pixels from (464,132).
+        int lit = 0, background = 0, other = 0;
+        for (int y = 132; y < 196; y += 2)
+        {
+            for (int x = 464; x < 496; x += 2)
+            {
+                const Rgb c = ReadPixel(ctx, x, y);
+                if (Near(c, 255, 255, 255))
+                    ++lit;
+                else if (Near(c, 255, 0, 0))
+                    ++background;
+                else
+                    ++other;
+            }
+        }
+        WT_CHECK(lit > 40 && background > 100 && other == 0, "text: %d lit, %d background, %d other pixels", lit,
+                 background, other);
+        EXPECT_PIXEL(ctx, 460, 164, 255, 0, 0, "left of the text");
+        EXPECT_PIXEL(ctx, 500, 164, 255, 0, 0, "right of the text");
+
+        // Nothing is drawn once the overlay is cleared.
+        BeginFrame(ctx, 0xFFFF0000);
+        EndFrame(ctx);
+        EXPECT_PIXEL(ctx, 200, 150, 255, 0, 0, "cleared overlay");
+    }
+
     void TestRenderToTexture(CKRasterizerContext *ctx)
     {
         const CKDWORD target = CreateTexture(ctx, _32_ARGB8888, 64, 64, NULL, CKRST_TEXTURE_RENDERTARGET);
@@ -593,6 +638,7 @@ void RunRasterizerTests()
     TestLighting(ctx);
     TestPointAndSpotLights(ctx);
     TestPretransformed(ctx);
+    TestOverlay(ctx);
     TestRenderToTexture(ctx);
 
     ctx->BeginShutdown();

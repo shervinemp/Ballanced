@@ -30,6 +30,10 @@ namespace wiisystem
         // heap from MEM1 to MEM2 once MEM1 is used up, and never moves back.
         void *g_Arena2Start = NULL;
 
+        const int kMaxOverlayItems = 64;
+        OverlayItem g_Overlay[OVERLAY_LAYER_COUNT][kMaxOverlayItems];
+        int g_OverlayCount[OVERLAY_LAYER_COUNT];
+
         bool g_PointerVisible = false;
         float g_PointerX = 0.0f;
         float g_PointerY = 0.0f;
@@ -345,6 +349,47 @@ namespace wiisystem
         if (angle)
             *angle = g_PointerAngle;
         return g_PointerVisible;
+    }
+
+    void SetOverlay(OverlayLayer layer, const OverlayItem *items, int count)
+    {
+        if (layer < 0 || layer >= OVERLAY_LAYER_COUNT)
+            return;
+        if (count > kMaxOverlayItems)
+            count = kMaxOverlayItems;
+        if (count > 0 && items)
+            memcpy(g_Overlay[layer], items, count * sizeof(OverlayItem));
+        g_OverlayCount[layer] = items ? count : 0;
+    }
+
+    int GetOverlay(OverlayLayer layer, const OverlayItem **items)
+    {
+        if (layer < 0 || layer >= OVERLAY_LAYER_COUNT)
+            return 0;
+        if (items)
+            *items = g_Overlay[layer];
+        return g_OverlayCount[layer];
+    }
+
+    OverlayItem MakeOverlayItem(float x0, float y0, float x1, float y1, u32 fill, u32 border,
+                                const char *text, u32 textColor, float textScale)
+    {
+        OverlayItem item;
+        item.X0 = x0;
+        item.Y0 = y0;
+        item.X1 = x1;
+        item.Y1 = y1;
+        item.Fill = fill;
+        item.Border = border;
+        item.TextColor = textColor;
+        item.TextScale = textScale;
+        item.Text[0] = '\0';
+        if (text)
+        {
+            strncpy(item.Text, text, sizeof(item.Text) - 1);
+            item.Text[sizeof(item.Text) - 1] = '\0';
+        }
+        return item;
     }
 
     void ShowMessage(const char *title, const char *message)

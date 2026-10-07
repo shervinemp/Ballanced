@@ -342,6 +342,7 @@ CKBOOL CKGXRasterizerContext::BackToFront(CKBOOL vsync)
     if (m_Target)
         SetTargetTexture(0, 0, 0, CKRST_CUBEFACE_XPOS);
 
+    DrawOverlay();
     DrawPointer();
 
     // Readbacks see the finished picture before the copy clears the EFB.
