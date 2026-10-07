@@ -330,11 +330,31 @@ apps/ballance/
   Fonts/          optional: TrueType fonts for text drawn with system fonts
 ```
 
-Start it from the Homebrew Channel. The game runs from the folder `boot.dol` was started from, on an SD card or a USB drive; when the loader passes no path it looks for `apps/ballance/` or `ballance/` on either device. `Player.ini` and `Player.log` are written to that folder.
+Start it from the Homebrew Channel. The game runs from the folder `boot.dol` was started from, on an SD card or a USB drive; when the loader passes no path it looks for `apps/ballance/` or `ballance/` on either device. `Player.ini` and `Player.log` are written to that folder, and so are the game's settings and high scores (`Database.tdb`, `registry.ini`).
+
+### Playing
+
+| | Wii Remote sideways | Wii Remote + Nunchuk | Classic / GameCube controller |
+|---|---|---|---|
+| Roll the ball | D-Pad | Control Stick | Stick or D-Pad |
+| Turn the camera | 1 | Z | Y, L, ZL / Y, L, Z |
+| Overhead camera | 2 | C | X, R, ZR / X, R |
+| Confirm | A | A | A |
+| Back, pause | + or - | +, - or B | B, +, - / B, Start |
+
+Pointing the Wii Remote at the screen moves the mouse pointer, and A clicks. A USB keyboard works as on a PC.
+
+When the game asks for a name, an on-screen keyboard appears: point at a key and press A, or move with the D-Pad or a stick and press A (2 on a sideways remote, C on a Nunchuk). B deletes, + (Start) confirms and - toggles Shift, which starts on for a capital first letter.
+
+HOME (Start + Z on a GameCube controller) opens the HOME menu over the paused game, with the way back to the Homebrew Channel or the Wii Menu and the Wii Remote batteries. Power and Reset on the console work as in any title.
+
+The game starts in the console's language when Ballance has it (German, English, Spanish, Italian or French) and in English otherwise; `Language` in `Player.ini` overrides it (0 German, 1 English, 2 Spanish, 3 Italian, 4 French).
+
+Every half minute `Player.log` records the frame rate, how each frame splits between work, waiting for the GPU and waiting for the TV, and how much memory is in use and free (every five seconds with `Verbose = 1`).
 
 ### On-console tests
 
-`tests.dol` checks state chunk and file byte layouts, media readers and writers, sound playback, fonts, GX rasterizer output, physics and a render engine scene, and writes a small demo composition to `sd:/apps/ballance-demo/base.cmo`. Copy it to `apps/wiitests/boot.dol` and start it; results appear on screen and in `sd:/wiitests.log`. In Dolphin, enable SD card folder sync and, under Graphics > Hacks, turn off "Skip EFB Access from CPU" and "Store EFB Copies to Texture Only" so the rasterizer checks can read the frame back. Turning on MMU emulation (Config > Advanced) makes invalid memory accesses fault as they would on a console instead of reading zeros.
+`tests.dol` checks the memory available to the game, state chunk and file byte layouts, media readers and writers, sound playback, fonts, the game database, GX rasterizer output and the system screens drawn over it, building blocks, the on-screen keyboard, physics and a render engine scene, and writes a small demo composition to `sd:/apps/ballance-demo/base.cmo`. Copy it to `apps/wiitests/boot.dol` and start it; results appear on screen and in `sd:/wiitests.log`. In Dolphin, enable SD card folder sync and, under Graphics > Hacks, turn off "Skip EFB Access from CPU" and "Store EFB Copies to Texture Only" so the rasterizer checks can read the frame back. Turning on MMU emulation (Config > Advanced) makes invalid memory accesses fault as they would on a console instead of reading zeros.
 
 ## Troubleshooting
 
