@@ -66,9 +66,14 @@ int main(int argc, char **argv)
     WT_CHECK(context != NULL, "CK context");
     RunReaderTests();
     if (storage)
+    {
         RunFileTests(context);
+        RunSoundTests(context);
+    }
     else
-        wiitest::Log("No storage: file tests skipped");
+    {
+        wiitest::Log("No storage: file and sound tests skipped");
+    }
 
     RunRasterizerTests();
     RunSceneTests(context);

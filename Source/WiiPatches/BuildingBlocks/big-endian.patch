@@ -162,3 +162,26 @@ index 0947ac6..23bc21c 100644
  
      m_Crypted = crypted;
      return true;
+diff --git a/TT_Toolbox_RT/Behaviors/HighMapMeshform.cpp b/TT_Toolbox_RT/Behaviors/HighMapMeshform.cpp
+index 30a5386..698ffa4 100644
+--- a/TT_Toolbox_RT/Behaviors/HighMapMeshform.cpp
++++ b/TT_Toolbox_RT/Behaviors/HighMapMeshform.cpp
+@@ -6,6 +6,7 @@
+ //////////////////////////////////////
+ //////////////////////////////////////
+ #include "CKAll.h"
++#include <string.h>
+ #include "ToolboxGuids.h"
+ 
+ CKObjectDeclaration *FillBehaviorHighMapMeshformDecl();
+@@ -122,7 +123,9 @@ int HighMapMeshform(const CKBehaviorContext &behcontext)
+ 
+         // Get pixel value (alpha channel from ARGB)
+         int pixelOffset = u * 4 + v * texWidth * 4;
+-        int alphaValue = surfacePtr[pixelOffset + 3];  // HIBYTE of ARGB = Alpha
++        CKDWORD pixel;
++        memcpy(&pixel, surfacePtr + pixelOffset, sizeof(pixel));
++        int alphaValue = (int)(pixel >> 24);  // Alpha of the ARGB pixel word
+ 
+         // Restore original position
+         pos->x = originalPositions[i].x;

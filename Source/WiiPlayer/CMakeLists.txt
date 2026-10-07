@@ -119,6 +119,7 @@ add_executable(WiiPlayerTests
         tests/ReaderTests.cpp
         tests/RasterizerTests.cpp
         tests/SceneTests.cpp
+        tests/SoundTests.cpp
         "${_player_src}/StaticPlugins.cpp"
 )
 target_compile_features(WiiPlayerTests PRIVATE cxx_std_17)

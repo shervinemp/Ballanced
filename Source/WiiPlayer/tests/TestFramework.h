@@ -34,5 +34,6 @@ void RunFileTests(CKContext *context);
 void RunReaderTests();
 void RunRasterizerTests();
 void RunSceneTests(CKContext *context);
+void RunSoundTests(CKContext *context);
 
 #endif // WIITESTS_TESTFRAMEWORK_H

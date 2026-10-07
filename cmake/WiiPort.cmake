@@ -285,12 +285,13 @@ function(ballance_wii_port_building_blocks)
             FILES Materials-Textures/Behaviors/TextureSinus.cpp
             TARGETS MaterialsStatic
     )
-    # Font manager chunks and the little-endian Database.tdb file.
+    # Font manager chunks, the little-endian Database.tdb file and pixel bytes.
     ballance_wii_patch(BuildingBlocksEndian
             ROOT "${_root}"
             PATCH "${BALLANCE_WII_PATCH_DIR}/BuildingBlocks/big-endian.patch"
             FILES Interface/CKFontManager.cpp TT_DatabaseManager_RT/DatabaseManager.cpp
-            TARGETS InterfaceStatic TT_DatabaseManager_RTStatic
+                  TT_Toolbox_RT/Behaviors/HighMapMeshform.cpp
+            TARGETS InterfaceStatic TT_DatabaseManager_RTStatic TT_Toolbox_RTStatic
     )
 endfunction()
 
