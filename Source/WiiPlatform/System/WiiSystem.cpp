@@ -219,6 +219,11 @@ namespace wiisystem
     {
         const QuitAction action = g_QuitRequest;
 
+        // Go to black rather than leave the last frame up while the loader starts.
+        VIDEO_SetBlack(TRUE);
+        VIDEO_Flush();
+        VIDEO_WaitVSync();
+
         // Flush pending writes (saved scores, settings, logs) before leaving.
         fflush(NULL);
         if (g_StorageMounted)
