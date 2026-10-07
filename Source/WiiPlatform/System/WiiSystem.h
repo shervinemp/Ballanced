@@ -52,6 +52,11 @@ namespace wiisystem
     void OpenHomeMenu();
     bool UpdateHomeMenu();
 
+    // Frame timing: the rasterizer adds how long each frame waited for the GPU
+    // to finish and for the TV's vertical blank; the player takes the totals.
+    void AddFrameWaits(u64 gpuTicks, u64 vsyncTicks);
+    void TakeFrameWaits(u64 *gpuTicks, u64 *vsyncTicks);
+
     // Heap bytes in use, and bytes the heap can still hand out (free blocks
     // plus the unclaimed part of the memory arenas it grows into).
     void GetMemoryStatus(u32 *used, u32 *available);

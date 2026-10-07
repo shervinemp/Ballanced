@@ -30,6 +30,9 @@ namespace wiisystem
         // heap from MEM1 to MEM2 once MEM1 is used up, and never moves back.
         void *g_Arena2Start = NULL;
 
+        u64 g_GpuWait = 0;
+        u64 g_VsyncWait = 0;
+
         const int kMaxOverlayItems = 64;
         OverlayItem g_Overlay[OVERLAY_LAYER_COUNT][kMaxOverlayItems];
         int g_OverlayCount[OVERLAY_LAYER_COUNT];
@@ -510,6 +513,21 @@ namespace wiisystem
         }
         PublishHomeMenu();
         return true;
+    }
+
+    void AddFrameWaits(u64 gpuTicks, u64 vsyncTicks)
+    {
+        g_GpuWait += gpuTicks;
+        g_VsyncWait += vsyncTicks;
+    }
+
+    void TakeFrameWaits(u64 *gpuTicks, u64 *vsyncTicks)
+    {
+        if (gpuTicks)
+            *gpuTicks = g_GpuWait;
+        if (vsyncTicks)
+            *vsyncTicks = g_VsyncWait;
+        g_GpuWait = g_VsyncWait = 0;
     }
 
     void GetMemoryStatus(u32 *used, u32 *available)

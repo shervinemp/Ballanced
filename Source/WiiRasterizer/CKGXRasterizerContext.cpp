@@ -2,6 +2,8 @@
 
 #include "WiiSystem.h"
 
+#include <ogc/lwp_watchdog.h>
+
 #include <malloc.h>
 #include <string.h>
 
@@ -132,11 +134,14 @@ void CKGXRasterizerContext::CopyToScreen()
     // Clear() draws its own quad, so the copy keeps the EFB: readbacks after
     // BackToFront see the frame just presented.
     GX_CopyDisp(m_FrameBuffers[m_FrameBuffer], GX_FALSE);
+    const u64 submitted = gettime();
     GX_DrawDone();
+    const u64 drawn = gettime();
     VIDEO_SetNextFramebuffer(m_FrameBuffers[m_FrameBuffer]);
     VIDEO_Flush();
     // The TV refresh paces the game, like a console title.
     VIDEO_WaitVSync();
+    wiisystem::AddFrameWaits(drawn - submitted, gettime() - drawn);
 }
 
 // ---------------------------------------------------------------------------

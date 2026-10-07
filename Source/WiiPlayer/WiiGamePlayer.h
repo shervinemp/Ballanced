@@ -29,6 +29,7 @@ private:
     bool FinishLoad(const char *filename, const char *resolvedFile);
     bool Update();
     void OpenHomeMenu();
+    void LogPerformance();
 
     void DrainPlayerCommands();
     int ExecutePlayerCommand(const TTPlayerCommand &command);
@@ -38,6 +39,8 @@ private:
     CGameInfo *m_GameInfo;
     bool m_Running;
     unsigned int m_FrameCount;
+    unsigned int m_ReportFrame;
+    unsigned long long m_LastReport; // Time base ticks
 
     CKContext *m_CKContext;
     CKRenderContext *m_RenderContext;

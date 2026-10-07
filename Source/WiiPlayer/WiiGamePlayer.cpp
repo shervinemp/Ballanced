@@ -5,6 +5,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <ogc/lwp_watchdog.h>
+
 #include "InterfaceManager.h"
 #include "Logger.h"
 #include "StaticPlugins.h"
@@ -105,6 +107,8 @@ WiiGamePlayer::WiiGamePlayer()
     : m_GameInfo(NULL),
       m_Running(false),
       m_FrameCount(0),
+      m_ReportFrame(0),
+      m_LastReport(0),
       m_CKContext(NULL),
       m_RenderContext(NULL),
       m_RenderManager(NULL),
@@ -292,6 +296,9 @@ bool WiiGamePlayer::Load(const char *filename)
         return false;
 
     LogMemory("after loading");
+    wiisystem::TakeFrameWaits(NULL, NULL);
+    m_LastReport = gettime();
+    m_ReportFrame = m_FrameCount;
     m_CKContext->Play();
     return true;
 }
@@ -380,13 +387,35 @@ bool WiiGamePlayer::Update()
         m_TimeManager->ResetChronos(TRUE, FALSE);
         m_RenderContext->Render(); // Waits for the vertical blank
         worked = true;
-        // Levels load from scripts, so check the heap now and then.
-        if (++m_FrameCount % 1800 == 0)
-            LogMemory("while playing");
+        // Levels load from scripts, so check the heap and the frame time now and then.
+        if (++m_FrameCount - m_ReportFrame >= (m_Config.verbose ? 300u : 1800u))
+            LogPerformance();
     }
     if (!worked)
         usleep(1000);
     return true;
+}
+
+void WiiGamePlayer::LogPerformance()
+{
+    const u64 now = gettime();
+    u64 gpu = 0;
+    u64 vsync = 0;
+    wiisystem::TakeFrameWaits(&gpu, &vsync);
+    const unsigned int frames = m_FrameCount - m_ReportFrame;
+    if (m_LastReport != 0 && frames > 0)
+    {
+        const float elapsed = ticks_to_microsecs(now - m_LastReport) / 1000.0f;
+        const float frame = elapsed / frames;
+        const float gpuWait = ticks_to_microsecs(gpu) / 1000.0f / frames;
+        const float tvWait = ticks_to_microsecs(vsync) / 1000.0f / frames;
+        CLogger::Get().Info("Frames: %.1f per second, %.1f ms each: %.1f ms busy, %.1f ms waiting for the GPU, "
+                            "%.1f ms for the TV",
+                            frames * 1000.0f / elapsed, frame, frame - gpuWait - tvWait, gpuWait, tvWait);
+    }
+    m_LastReport = now;
+    m_ReportFrame = m_FrameCount;
+    LogMemory("while playing");
 }
 
 void WiiGamePlayer::OpenHomeMenu()
@@ -396,6 +425,10 @@ void WiiGamePlayer::OpenHomeMenu()
     wiisystem::OpenHomeMenu();
     while (wiisystem::UpdateHomeMenu())
         m_RenderContext->Render();
+    // Menu frames don't count towards the game's frame times.
+    wiisystem::TakeFrameWaits(NULL, NULL);
+    m_LastReport = 0;
+    m_ReportFrame = m_FrameCount;
     if (wiisystem::GetQuitRequest() == wiisystem::QUIT_NONE)
         m_CKContext->Play();
     else
