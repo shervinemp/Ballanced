@@ -121,12 +121,15 @@ add_executable(WiiPlayerTests
         tests/SceneTests.cpp
         tests/SoundTests.cpp
         tests/DemoComposition.cpp
+        tests/PhysicsTests.cpp
         "${_player_src}/StaticPlugins.cpp"
 )
 target_compile_features(WiiPlayerTests PRIVATE cxx_std_17)
 target_compile_definitions(WiiPlayerTests PRIVATE BALLANCE_STATIC_MODULES ${_static_definitions})
-target_include_directories(WiiPlayerTests PRIVATE "${_player_src}" "${_generated}")
-target_link_libraries(WiiPlayerTests PRIVATE ${_static_targets} CKGXRasterizer CK2 VxMath WiiSystem)
+# The physics suite drives physics_RT's manager directly, like its own tests.
+target_include_directories(WiiPlayerTests PRIVATE "${_player_src}" "${_generated}"
+        "${CMAKE_SOURCE_DIR}/Source/BuildingBlocks/physics_RT")
+target_link_libraries(WiiPlayerTests PRIVATE ${_static_targets} CKGXRasterizer CK2 VxMath WiiSystem ivp_controller)
 set_target_properties(WiiPlayerTests PROPERTIES OUTPUT_NAME tests SUFFIX ".elf")
 ogc_create_dol(WiiPlayerTests)
 add_custom_command(TARGET WiiPlayerTests POST_BUILD
