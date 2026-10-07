@@ -82,6 +82,7 @@ namespace wiisystem
     enum OverlayLayer
     {
         OVERLAY_KEYBOARD = 0, // Owned by the input manager
+        OVERLAY_NOTICE,       // Owned by the input manager
         OVERLAY_HOME_MENU,    // Owned by the HOME menu
         OVERLAY_LAYER_COUNT
     };

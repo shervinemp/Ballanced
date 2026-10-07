@@ -204,6 +204,7 @@ CKERROR WiiInputManager::OnCKEnd()
     }
     wiisystem::SetPointer(false, 0.0f, 0.0f, 0.0f);
     WiiScreenKeyboard::Hide();
+    wiisystem::SetOverlay(wiisystem::OVERLAY_NOTICE, NULL, 0);
     return CK_OK;
 }
 
@@ -603,9 +604,22 @@ void WiiInputManager::PollControllers(CKBYTE wanted[WII_KEYBOARD_SIZE], CKDWORD 
         }
     }
 
-    // Losing the last controller mid-game opens the game's pause menu.
+    // Losing the last controller mid-game opens the game's pause menu and
+    // asks for a controller until one is back.
     if (connected == 0 && m_ControllersConnected > 0)
+    {
         wanted[DIK_ESCAPE] = 1;
+        wiisystem::OverlayItem notice[3] = {
+            wiisystem::MakeOverlayItem(110, 180, 530, 300, 0x2A2E36F0, 0xA8B0BCFF),
+            wiisystem::MakeOverlayItem(110, 196, 530, 240, 0, 0, "Controller disconnected", 0xFFFFFFFF, 2.0f),
+            wiisystem::MakeOverlayItem(110, 248, 530, 280, 0, 0, "Press a button to reconnect.", 0xD0D4DAFF),
+        };
+        wiisystem::SetOverlay(wiisystem::OVERLAY_NOTICE, notice, 3);
+    }
+    else if (connected > 0 && m_ControllersConnected == 0)
+    {
+        wiisystem::SetOverlay(wiisystem::OVERLAY_NOTICE, NULL, 0);
+    }
     m_ControllersConnected = connected;
 
     // Left mouse button follows A on the pointing remote.
