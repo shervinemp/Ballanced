@@ -343,7 +343,7 @@ Start it from the Homebrew Channel. The game runs from the folder `boot.dol` was
 | Confirm | A | A | A |
 | Back, pause | + or - | +, - or B | B, +, - / B, Start |
 
-Pointing the Wii Remote at the screen moves the mouse pointer. A clicks while the game is reading the mouse buttons, and confirms like Enter otherwise, so menus made for the keyboard still work while pointing. A USB keyboard works as on a PC.
+Where the game uses the mouse, pointing the Wii Remote at the screen shows a pointer and A clicks; elsewhere A confirms like Enter, so menus made for the keyboard still work while pointing. A USB keyboard works as on a PC.
 
 When the game asks for a name, an on-screen keyboard appears: point at a key and press A, or move with the D-Pad or a stick and press A (2 on a sideways remote, C on a Nunchuk). B deletes, + (Start) confirms and - toggles Shift, which starts on for a capital first letter.
 
