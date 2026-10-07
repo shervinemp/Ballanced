@@ -1,3 +1,61 @@
+diff --git a/BuildingBlocksAddons1/Behaviors/CombineTexture.cpp b/BuildingBlocksAddons1/Behaviors/CombineTexture.cpp
+index 0467058..948bf17 100644
+--- a/BuildingBlocksAddons1/Behaviors/CombineTexture.cpp
++++ b/BuildingBlocksAddons1/Behaviors/CombineTexture.cpp
+@@ -3,6 +3,13 @@
+ /////////////////////////////////////////////////////
+ #include "CKAll.h"
+ 
++// Byte offset of each channel in a texel, a host-order ARGB word.
++#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
++enum { kTexelBlue = 3, kTexelGreen = 2, kTexelRed = 1, kTexelAlpha = 0 };
++#else
++enum { kTexelBlue = 0, kTexelGreen = 1, kTexelRed = 2, kTexelAlpha = 3 };
++#endif
++
+ CKObjectDeclaration *FillBehaviorCombineTextureDecl();
+ CKERROR CreateCombineTextureProto(CKBehaviorPrototype **);
+ int CombineTexture(const CKBehaviorContext &behcontext);
+@@ -115,18 +122,12 @@ int CombineTexture(const CKBehaviorContext &behcontext)
+                 {
+                     for (int i = 0; i < width * height; ++i)
+                     {
+-                        *tempdata = (unsigned char)((*tempdata) * invcolf.b + (*coldata) * colf.b);
+-                        tempdata++;
+-                        coldata++;
+-                        *tempdata = (unsigned char)((*tempdata) * invcolf.g + (*coldata) * colf.g);
+-                        tempdata++;
+-                        coldata++;
+-                        *tempdata = (unsigned char)((*tempdata) * invcolf.r + (*coldata) * colf.r);
+-                        tempdata++;
+-                        coldata++;
+-                        *tempdata = (unsigned char)((*tempdata) * invcolf.a + (*coldata) * colf.a);
+-                        tempdata++;
+-                        coldata++;
++                        tempdata[kTexelBlue] = (unsigned char)(tempdata[kTexelBlue] * invcolf.b + coldata[kTexelBlue] * colf.b);
++                        tempdata[kTexelGreen] = (unsigned char)(tempdata[kTexelGreen] * invcolf.g + coldata[kTexelGreen] * colf.g);
++                        tempdata[kTexelRed] = (unsigned char)(tempdata[kTexelRed] * invcolf.r + coldata[kTexelRed] * colf.r);
++                        tempdata[kTexelAlpha] = (unsigned char)(tempdata[kTexelAlpha] * invcolf.a + coldata[kTexelAlpha] * colf.a);
++                        tempdata += 4;
++                        coldata += 4;
+                     }
+                 }
+             }
+@@ -147,11 +148,11 @@ int CombineTexture(const CKBehaviorContext &behcontext)
+                 if ((alphatex->GetWidth() == width) && (alphatex->GetHeight() == height))
+                 {
+                     CKBYTE *tempdata = data;
++                    // The alpha texture's blue channel becomes the alpha.
+                     for (int i = 0; i < width * height; ++i)
+                     {
+-                        tempdata += 3;
+-                        *tempdata = (*coldata);
+-                        tempdata++;
++                        tempdata[kTexelAlpha] = coldata[kTexelBlue];
++                        tempdata += 4;
+                         coldata += 4;
+                     }
+                 }
 diff --git a/Interface/CKFontManager.cpp b/Interface/CKFontManager.cpp
 index f8637f1..e78ef49 100644
 --- a/Interface/CKFontManager.cpp

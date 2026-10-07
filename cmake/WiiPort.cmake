@@ -298,8 +298,8 @@ function(ballance_wii_port_building_blocks)
             ROOT "${_root}"
             PATCH "${BALLANCE_WII_PATCH_DIR}/BuildingBlocks/big-endian.patch"
             FILES Interface/CKFontManager.cpp TT_DatabaseManager_RT/DatabaseManager.cpp
-                  TT_Toolbox_RT/Behaviors/HighMapMeshform.cpp
-            TARGETS InterfaceStatic TT_DatabaseManager_RTStatic TT_Toolbox_RTStatic
+                  TT_Toolbox_RT/Behaviors/HighMapMeshform.cpp BuildingBlocksAddons1/Behaviors/CombineTexture.cpp
+            TARGETS InterfaceStatic TT_DatabaseManager_RTStatic TT_Toolbox_RTStatic BuildingBlocksAddons1Static
     )
     # No system fonts: TrueType fonts are looked up in a Fonts folder next to the game.
     ballance_wii_patch(InterfaceFonts
