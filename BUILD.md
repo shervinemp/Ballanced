@@ -314,7 +314,7 @@ This produces `build/wii/Source/WiiPlayer/boot.dol` (the game) and `tests.dol` (
 
 ### Installing
 
-`cmake --install build/wii --prefix <SD card root>` writes `boot.dol`, `meta.xml` and `icon.png` to `apps/ballance/`. Copy the game files from your own Ballance installation into the same folder:
+`cmake --install build/wii --prefix <SD card root>` writes `boot.dol`, `meta.xml`, `icon.png` and a fallback font to `apps/ballance/`. Copy the game files from your own Ballance installation into the same folder:
 
 ```
 apps/ballance/
@@ -327,7 +327,8 @@ apps/ballance/
   Sounds/
   Text/
   Textures/
-  Fonts/          optional: TrueType fonts for text drawn with system fonts
+  Fonts/          Roboto, standing in for Windows fonts; add TrueType fonts
+                  (e.g. Arial) to match the PC game's text exactly
 ```
 
 Start it from the Homebrew Channel. The game runs from the folder `boot.dol` was started from, on an SD card or a USB drive; when the loader passes no path it looks for `apps/ballance/` or `ballance/` on either device. `Player.ini` and `Player.log` are written to that folder, and so are the game's settings and high scores (`Database.tdb`, `registry.ini`).

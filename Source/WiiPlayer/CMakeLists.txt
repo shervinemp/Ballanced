@@ -172,3 +172,15 @@ install(FILES
         DESTINATION apps/ballance
         COMPONENT Runtime
 )
+# The Wii has no system fonts. Text the game draws with a Windows font falls
+# back to Arial-like faces, Roboto among them (Apache License 2.0).
+set(_fonts "${CMAKE_SOURCE_DIR}/Source/BuildingBlocks/Interface/tests/fonts")
+install(FILES "${_fonts}/roboto-regular.ttf" "${_fonts}/roboto-bold.ttf"
+        DESTINATION apps/ballance/Fonts
+        COMPONENT Runtime
+)
+install(FILES "${_fonts}/LICENSE"
+        DESTINATION apps/ballance/Fonts
+        RENAME Roboto-LICENSE.txt
+        COMPONENT Runtime
+)

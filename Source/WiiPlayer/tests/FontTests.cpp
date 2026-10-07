@@ -99,6 +99,11 @@ void RunFontTests(CKContext *context)
     CKStbSystemFontFace face;
     WT_CHECK(CKStbFindBestFontFace(faces, "Roboto", 400, FALSE, face) && face.family == "Roboto",
              "Roboto found in the font folder");
+    // Windows fonts the game names fall back to it (the install ships Roboto).
+    WT_CHECK(CKStbFindBestFontFace(faces, "Arial", 700, FALSE, face) && face.family == "Roboto",
+             "Arial falls back to Roboto");
+    WT_CHECK(CKStbFindBestFontFace(faces, "Comic Sans MS", 400, TRUE, face) && face.family == "Roboto",
+             "an unknown font falls back to Roboto");
 
     // Font textures join the current level, which the game always has.
     CKLevel *level = (CKLevel *)context->CreateObject(CKCID_LEVEL, (CKSTRING) "WiiFontLevel");
