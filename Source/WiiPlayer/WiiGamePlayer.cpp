@@ -258,6 +258,14 @@ bool WiiGamePlayer::Load(const char *filename)
 
     RegisterCompositionPaths(pm, resolvedFile.CStr());
 
+    // Reading the composition from an SD card takes a few seconds.
+    const wiisystem::OverlayItem loading =
+        wiisystem::MakeOverlayItem(0, 400, 640, 456, 0, 0, "Loading...", 0xFFFFFFFF, 2.0f);
+    wiisystem::SetOverlay(wiisystem::OVERLAY_NOTICE, &loading, 1);
+    m_RenderContext->Clear((CK_RENDER_FLAGS)(CK_RENDER_CLEARBACK | CK_RENDER_CLEARZ));
+    m_RenderContext->BackToFront(CK_RENDER_DOBACKTOFRONT);
+    wiisystem::SetOverlay(wiisystem::OVERLAY_NOTICE, NULL, 0);
+
     m_CKContext->Reset();
     m_CKContext->ClearAll();
 
