@@ -457,6 +457,73 @@ namespace
         ctx->EnableLight(0, FALSE);
     }
 
+    // Draws triangles lit by light 0 with normals facing the viewer.
+    void DrawLitTriangles(CKRasterizerContext *ctx, const VxVector *positions, int count)
+    {
+        VxVector normals[6];
+        for (int i = 0; i < count; ++i)
+            normals[i] = VxVector(0, 0, -1);
+        VxDrawPrimitiveData data;
+        memset(&data, 0, sizeof(data));
+        data.VertexCount = count;
+        data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_LIGHT;
+        data.PositionPtr = const_cast<VxVector *>(positions);
+        data.PositionStride = sizeof(VxVector);
+        data.NormalPtr = normals;
+        data.NormalStride = sizeof(VxVector);
+        ctx->DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &data);
+    }
+
+    void TestPointAndSpotLights(CKRasterizerContext *ctx)
+    {
+        SetDiffuseState(ctx);
+        ctx->SetRenderState(VXRENDERSTATE_LIGHTING, TRUE);
+        ctx->SetRenderState(VXRENDERSTATE_COLORVERTEX, FALSE);
+        ctx->SetRenderState(VXRENDERSTATE_DIFFUSEFROMVERTEX, FALSE);
+        ctx->SetRenderState(VXRENDERSTATE_AMBIENT, 0xFF000000);
+        CKMaterialData material;
+        memset(&material, 0, sizeof(material));
+        material.Diffuse = VxColor(1.0f, 1.0f, 1.0f, 1.0f);
+        ctx->SetMaterial(&material);
+
+        // A point light at the eye, half a unit in front of the triangle.
+        // Lighting is per vertex: the base corners get N.L = 0.366 and the
+        // apex 0.486, so the centre, halfway up, is 0.426.
+        CKLightData light;
+        memset(&light, 0, sizeof(light));
+        light.Type = VX_LIGHTPOINT;
+        light.Diffuse = VxColor(1.0f, 0.0f, 0.0f, 1.0f);
+        light.Position = VxVector(0.0f, 0.0f, 0.0f);
+        light.Range = 1000.0f;
+        light.Attenuation0 = 1.0f;
+        ctx->SetLight(0, &light);
+        ctx->EnableLight(0, TRUE);
+        BeginFrame(ctx, 0xFF000000);
+        DrawLitTriangles(ctx, kCenterTriangle, 3);
+        EndFrame(ctx);
+        EXPECT_PIXEL(ctx, 320, 240, 109, 0, 0, "point light, per-vertex falloff");
+
+        // A spot light at the eye pointing into the screen with a 120 degree
+        // cone: a small triangle on its axis is lit, one 76 degrees off it
+        // (which a point light would reach) is not.
+        light.Type = VX_LIGHTSPOT;
+        light.Direction = VxVector(0.0f, 0.0f, 1.0f);
+        light.OuterSpotCone = 120.0f * PI / 180.0f;
+        light.InnerSpotCone = 100.0f * PI / 180.0f;
+        light.Falloff = 1.0f;
+        ctx->SetLight(0, &light);
+        const VxVector triangles[6] = {VxVector(-0.05f, -0.05f, 0.5f), VxVector(0.05f, -0.05f, 0.5f),
+                                       VxVector(0.0f, 0.05f, 0.5f),    VxVector(0.75f, -0.05f, 0.2f),
+                                       VxVector(0.85f, -0.05f, 0.2f),  VxVector(0.8f, 0.05f, 0.2f)};
+        BeginFrame(ctx, 0xFF000000);
+        DrawLitTriangles(ctx, triangles, 6);
+        EndFrame(ctx);
+        const Rgb onAxis = ReadPixel(ctx, 320, 240);
+        WT_CHECK(onAxis.r > 200 && onAxis.g < 8, "spot light on its axis: %d,%d,%d", onAxis.r, onAxis.g, onAxis.b);
+        EXPECT_PIXEL(ctx, 576, 240, 0, 0, 0, "spot light outside its cone");
+        ctx->EnableLight(0, FALSE);
+    }
+
     void TestPretransformed(CKRasterizerContext *ctx)
     {
         SetDiffuseState(ctx);
@@ -524,6 +591,7 @@ void RunRasterizerTests()
     TestTextures(ctx);
     TestFog(ctx);
     TestLighting(ctx);
+    TestPointAndSpotLights(ctx);
     TestPretransformed(ctx);
     TestRenderToTexture(ctx);
 

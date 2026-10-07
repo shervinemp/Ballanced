@@ -100,6 +100,10 @@ void RunFontTests(CKContext *context)
     WT_CHECK(CKStbFindBestFontFace(faces, "Roboto", 400, FALSE, face) && face.family == "Roboto",
              "Roboto found in the font folder");
 
+    // Font textures join the current level, which the game always has.
+    CKLevel *level = (CKLevel *)context->CreateObject(CKCID_LEVEL, (CKSTRING) "WiiFontLevel");
+    context->SetCurrentLevel(level);
+
     // Fonts are listed by family; the folder may hold others already.
     fonts->RegenerateFontEnumeration();
     int index = FindFontIndex(context, "Roboto");
@@ -118,6 +122,8 @@ void RunFontTests(CKContext *context)
         }
     }
 
+    context->SetCurrentLevel(NULL);
+    context->DestroyObject(level);
     remove(path.CStr());
     rmdir(folder.CStr());
     wiitest::EndSuite();
