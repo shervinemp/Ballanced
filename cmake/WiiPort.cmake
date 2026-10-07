@@ -70,13 +70,15 @@ endfunction()
 #     ROOT <upstream directory>
 #     PATCH <patch file>
 #     FILES <paths relative to ROOT>...
-#     TARGETS <targets>...)
+#     TARGETS <targets>...
+#     [PUBLIC_HEADERS])
 #
 # Copies FILES out of ROOT, applies PATCH to the copies and makes TARGETS build
 # the patched copies. List a header's same-directory includers in FILES too so
-# they pick up the patched header.
+# they pick up the patched header. PUBLIC_HEADERS also gives every consumer of
+# TARGETS the patched headers, for headers that change a public type.
 function(ballance_wii_patch name)
-    cmake_parse_arguments(PARSE_ARGV 1 _arg "" "ROOT;PATCH" "FILES;TARGETS")
+    cmake_parse_arguments(PARSE_ARGV 1 _arg "PUBLIC_HEADERS" "ROOT;PATCH" "FILES;TARGETS")
 
     set(_staging "${BALLANCE_WII_PATCHED_DIR}/${name}.staging")
     set(_output "${BALLANCE_WII_PATCHED_DIR}/${name}")
@@ -154,7 +156,13 @@ function(ballance_wii_patch name)
             endforeach ()
         endif ()
         if (_patched_header_dirs)
-            target_include_directories(${_real} BEFORE PRIVATE ${_patched_header_dirs})
+            if (_arg_PUBLIC_HEADERS)
+                foreach (_dir IN LISTS _patched_header_dirs)
+                    target_include_directories(${_real} BEFORE PUBLIC "$<BUILD_INTERFACE:${_dir}>")
+                endforeach ()
+            else ()
+                target_include_directories(${_real} BEFORE PRIVATE ${_patched_header_dirs})
+            endif ()
         endif ()
     endforeach ()
 
@@ -191,12 +199,17 @@ function(ballance_wii_port_vxmath)
 endfunction()
 
 # CK2: big-endian state chunks and files, and Wii storage paths ("sd:/").
+# Chunks keep the little-endian file layout in memory (CKChunkWord in
+# CKStateChunk.h), so the patched header is public; CKAll.h and CKFile.h include
+# it from the same directory and come along unchanged.
 function(ballance_wii_port_ck2)
     ballance_wii_patch(CK2
             ROOT "${PROJECT_SOURCE_DIR}/Source/CK2"
             PATCH "${BALLANCE_WII_PATCH_DIR}/CK2/big-endian.patch"
-            FILES src/CKStateChunk.cpp src/CKFile.cpp
+            FILES include/CKStateChunk.h include/CKAll.h include/CKFile.h
+                  src/CKStateChunk.cpp src/CKFile.cpp src/CKParameter.cpp src/CKWaveSound.cpp
             TARGETS CK2
+            PUBLIC_HEADERS
     )
     ballance_wii_patch(CK2Paths
             ROOT "${PROJECT_SOURCE_DIR}/Source/CK2"
@@ -213,6 +226,13 @@ function(ballance_wii_port_render_engine)
             ROOT "${_root}"
             PATCH "${BALLANCE_WII_PATCH_DIR}/RenderEngine/static-gx-rasterizer.patch"
             FILES src/CK2_3D.cpp
+            TARGETS CK2_3D
+    )
+    # Animation controller keys are dumped into chunks as raw words.
+    ballance_wii_patch(RenderEngineEndian
+            ROOT "${_root}"
+            PATCH "${BALLANCE_WII_PATCH_DIR}/RenderEngine/big-endian.patch"
+            FILES src/CKObjectAnimation.cpp
             TARGETS CK2_3D
     )
     _ballance_wii_resolve_target(_ck2_3d CK2_3D)
@@ -232,9 +252,21 @@ endfunction()
 
 # Plugins: CK2's CKJpegDecoder.cpp already compiles stb_image (JPEG only, no
 # stdio); a second copy in AVIReader collides once both are linked statically.
+# The readers parse little-endian files and hand out host-order pixels and
+# samples. The reader headers include ImageReader.h from their own directory.
 function(ballance_wii_port_plugins)
+    set(_root "${PROJECT_SOURCE_DIR}/Source/Plugins")
     ballance_wii_replace_sources(AVIReaderStatic
-            REMOVE "${PROJECT_SOURCE_DIR}/Source/Plugins/AVIReader/StbImageImpl.cpp"
+            REMOVE "${_root}/AVIReader/StbImageImpl.cpp"
+    )
+    ballance_wii_patch(Plugins
+            ROOT "${_root}"
+            PATCH "${BALLANCE_WII_PATCH_DIR}/Plugins/big-endian.patch"
+            FILES ImageReader/ImageReader.h ImageReader/BmpReader.h ImageReader/TgaReader.h
+                  ImageReader/PcxReader.h ImageReader/ImageReader.cpp ImageReader/BmpReader.cpp
+                  ImageReader/TgaReader.cpp ImageReader/PcxReader.cpp
+                  WavReader/WavReader.cpp AVIReader/FrameDecoder.cpp
+            TARGETS ImageReaderStatic WavReaderStatic AVIReaderStatic
     )
 endfunction()
 
@@ -252,6 +284,13 @@ function(ballance_wii_port_building_blocks)
             PATCH "${BALLANCE_WII_PATCH_DIR}/BuildingBlocks/texture-sinus-big-endian.patch"
             FILES Materials-Textures/Behaviors/TextureSinus.cpp
             TARGETS MaterialsStatic
+    )
+    # Font manager chunks and the little-endian Database.tdb file.
+    ballance_wii_patch(BuildingBlocksEndian
+            ROOT "${_root}"
+            PATCH "${BALLANCE_WII_PATCH_DIR}/BuildingBlocks/big-endian.patch"
+            FILES Interface/CKFontManager.cpp TT_DatabaseManager_RT/DatabaseManager.cpp
+            TARGETS InterfaceStatic TT_DatabaseManager_RTStatic
     )
 endfunction()
 

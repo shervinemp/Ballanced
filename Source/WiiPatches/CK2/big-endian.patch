@@ -1,1058 +1,1328 @@
+diff --git a/include/CKStateChunk.h b/include/CKStateChunk.h
+index c702012..ff2a49b 100644
+--- a/include/CKStateChunk.h
++++ b/include/CKStateChunk.h
+@@ -7,10 +7,35 @@
+ #include "VxDefines.h"
+ #include "VxVector.h"
+ 
++// One word of chunk data. Chunks keep the little-endian layout of Virtools
++// files in memory on every host, so a word converts to and from the host byte
++// order when it is read or assigned. Strings, pixels and other raw buffers are
++// copied byte for byte; the _LEndian functions convert arrays of words.
++struct CKChunkWord
++{
++    int Raw;
++
++    operator int() const { return Swap(Raw); }
++    CKChunkWord &operator=(int value)
++    {
++        Raw = Swap(value);
++        return *this;
++    }
++
++    static int Swap(int value)
++    {
++#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
++        return (int)__builtin_bswap32((unsigned int)value);
++#else
++        return value;
++#endif
++    }
++};
++
+ struct ChunkIteratorData
+ {
+     int ChunkVersion;
+-    int *Data;
++    CKChunkWord *Data;
+     int ChunkSize;
+     CKBOOL Flag;
+     int *Ids;
+@@ -390,7 +415,7 @@ public:
+ private:
+     int m_ChunkClassID;
+     int m_ChunkSize;
+-    int *m_Data;
++    CKChunkWord *m_Data;
+     short int m_DataVersion;
+     short int m_ChunkVersion;
+     ChunkParser *m_ChunkParser;
+diff --git a/src/CKFile.cpp b/src/CKFile.cpp
+index 0717beb..9dfbb4f 100644
 --- a/src/CKFile.cpp
 +++ b/src/CKFile.cpp
-@@ -123,6 +123,9 @@
+@@ -38,6 +38,35 @@ struct CKFileHeader {
+     CKFileHeaderPart1 Part1;
+ };
+ 
++// Virtools files are little-endian on every host: these convert headers,
++// GUIDs and record ints between the file layout and the host byte order.
++static void SwapHeaderPart0(CKFileHeaderPart0 &part) {
++    CKConvertEndianArray32(&part.Crc, (sizeof(part) - sizeof(part.Signature)) / sizeof(CKDWORD));
++}
++
++static void SwapHeaderPart1(CKFileHeaderPart1 &part) {
++    CKConvertEndianArray32(&part, sizeof(part) / sizeof(CKDWORD));
++}
++
++static void SwapGuids(CKGUID *guids, int count) {
++    CKConvertEndianArray32(guids, count * 2);
++}
++
++static void WriteFileInt(CKBufferParser *parser, int value) {
++    value = CKChunkWord::Swap(value);
++    parser->Write(&value, sizeof(value));
++}
++
++static void WriteFileGuid(CKBufferParser *parser, const CKGUID &guid) {
++    WriteFileInt(parser, guid.d1);
++    WriteFileInt(parser, guid.d2);
++}
++
++static size_t WriteFileInt(FILE *fp, CKDWORD value) {
++    value = (CKDWORD) CKChunkWord::Swap((int) value);
++    return fwrite(&value, sizeof(value), 1, fp);
++}
++
+ extern XClassInfoArray g_CKClassInfo;
+ extern CK_CLASSID g_MaxClassID;
+ 
+@@ -123,7 +152,7 @@ int CKBufferParser::ReadInt() {
      int val;
      memcpy(&val, &m_Buffer[m_CursorPos], sizeof(int));
      m_CursorPos += sizeof(int);
-+#ifdef WII
-+    val = (int)__builtin_bswap32((uint32_t)val);
-+#endif
-     return val;
+-    return val;
++    return CKChunkWord::Swap(val);
  }
  
-@@ -443,6 +446,13 @@
+ void CKBufferParser::Seek(int Pos) {
+@@ -443,6 +472,7 @@ CKERROR CKFile::ReadFileHeaders(CKBufferParser **ParserPtr) {
      CKFileHeader header = {};
  
      parser->Read(&header.Part0, sizeof(CKFileHeaderPart0));
-+#ifdef WII
-+    header.Part0.CKVersion = __builtin_bswap32(header.Part0.CKVersion);
-+    header.Part0.FileVersion = __builtin_bswap32(header.Part0.FileVersion);
-+    header.Part0.FileVersion2 = __builtin_bswap32(header.Part0.FileVersion2);
-+    header.Part0.FileWriteMode = __builtin_bswap32(header.Part0.FileWriteMode);
-+    header.Part0.Hdr1PackSize = __builtin_bswap32(header.Part0.Hdr1PackSize);
-+#endif
++    SwapHeaderPart0(header.Part0);
  
      if (header.Part0.FileVersion2 != 0) {
          memset(&header.Part0, 0, sizeof(CKFileHeaderPart0));
-@@ -458,6 +468,16 @@
+@@ -458,6 +488,7 @@ CKERROR CKFile::ReadFileHeaders(CKBufferParser **ParserPtr) {
          memset(&header.Part1, 0, sizeof(CKFileHeaderPart1));
      } else if (parser->Size() >= sizeof(CKFileHeader)) {
          parser->Read(&header.Part1, sizeof(CKFileHeaderPart1));
-+#ifdef WII
-+        header.Part1.DataPackSize = __builtin_bswap32(header.Part1.DataPackSize);
-+        header.Part1.DataUnPackSize = __builtin_bswap32(header.Part1.DataUnPackSize);
-+        header.Part1.ManagerCount = __builtin_bswap32(header.Part1.ManagerCount);
-+        header.Part1.ObjectCount = __builtin_bswap32(header.Part1.ObjectCount);
-+        header.Part1.MaxIDSaved = __builtin_bswap32(header.Part1.MaxIDSaved);
-+        header.Part1.ProductVersion = __builtin_bswap32(header.Part1.ProductVersion);
-+        header.Part1.ProductBuild = __builtin_bswap32(header.Part1.ProductBuild);
-+        header.Part1.Hdr1UnPackSize = __builtin_bswap32(header.Part1.Hdr1UnPackSize);
-+#endif
++        SwapHeaderPart1(header.Part1);
      } else {
          return CKERR_INVALIDFILE;
      }
-@@ -480,10 +500,30 @@
-     m_FileInfo.Hdr1UnPackSize = header.Part1.Hdr1UnPackSize;
-     m_FileInfo.DataPackSize = header.Part1.DataPackSize;
-     m_FileInfo.DataUnPackSize = header.Part1.DataUnPackSize;
-+#ifdef WII
-+    m_FileInfo.Crc = __builtin_bswap32(header.Part0.Crc);
-+#else
-     m_FileInfo.Crc = header.Part0.Crc;
-+#endif
+@@ -484,7 +515,10 @@ CKERROR CKFile::ReadFileHeaders(CKBufferParser **ParserPtr) {
  
      if (header.Part0.FileVersion >= 8) {
          header.Part0.Crc = 0;
-+#ifdef WII
-+        // Swap back to little endian byte-layout for computing the CRC
-+        header.Part0.CKVersion = __builtin_bswap32(header.Part0.CKVersion);
-+        header.Part0.FileVersion = __builtin_bswap32(header.Part0.FileVersion);
-+        header.Part0.FileVersion2 = __builtin_bswap32(header.Part0.FileVersion2);
-+        header.Part0.FileWriteMode = __builtin_bswap32(header.Part0.FileWriteMode);
-+        header.Part0.Hdr1PackSize = __builtin_bswap32(header.Part0.Hdr1PackSize);
-+        header.Part1.DataPackSize = __builtin_bswap32(header.Part1.DataPackSize);
-+        header.Part1.DataUnPackSize = __builtin_bswap32(header.Part1.DataUnPackSize);
-+        header.Part1.ManagerCount = __builtin_bswap32(header.Part1.ManagerCount);
-+        header.Part1.ObjectCount = __builtin_bswap32(header.Part1.ObjectCount);
-+        header.Part1.MaxIDSaved = __builtin_bswap32(header.Part1.MaxIDSaved);
-+        header.Part1.ProductVersion = __builtin_bswap32(header.Part1.ProductVersion);
-+        header.Part1.ProductBuild = __builtin_bswap32(header.Part1.ProductBuild);
-+        header.Part1.Hdr1UnPackSize = __builtin_bswap32(header.Part1.Hdr1UnPackSize);
-+#endif
-         CKDWORD crc = CKComputeDataCRC((char *) (&header.Part0), sizeof(CKFileHeaderPart0), 0);
+-        CKDWORD crc = CKComputeDataCRC((char *) (&header.Part0), sizeof(CKFileHeaderPart0), 0);
++        // The CRC covers the header as it is stored in the file.
++        CKFileHeaderPart0 filePart0 = header.Part0;
++        SwapHeaderPart0(filePart0);
++        CKDWORD crc = CKComputeDataCRC((char *) (&filePart0), sizeof(CKFileHeaderPart0), 0);
          int prev = parser->CursorPos();
          parser->Seek(sizeof(CKFileHeaderPart0));
-@@ -493,6 +533,22 @@
-         parser->Skip(m_FileInfo.Hdr1PackSize);
-         crc = parser->ComputeCRC(m_FileInfo.DataPackSize, crc);
-         parser->Seek(prev);
-+#ifdef WII
-+        // Swap back to big endian for logic handling
-+        header.Part0.CKVersion = __builtin_bswap32(header.Part0.CKVersion);
-+        header.Part0.FileVersion = __builtin_bswap32(header.Part0.FileVersion);
-+        header.Part0.FileVersion2 = __builtin_bswap32(header.Part0.FileVersion2);
-+        header.Part0.FileWriteMode = __builtin_bswap32(header.Part0.FileWriteMode);
-+        header.Part0.Hdr1PackSize = __builtin_bswap32(header.Part0.Hdr1PackSize);
-+        header.Part1.DataPackSize = __builtin_bswap32(header.Part1.DataPackSize);
-+        header.Part1.DataUnPackSize = __builtin_bswap32(header.Part1.DataUnPackSize);
-+        header.Part1.ManagerCount = __builtin_bswap32(header.Part1.ManagerCount);
-+        header.Part1.ObjectCount = __builtin_bswap32(header.Part1.ObjectCount);
-+        header.Part1.MaxIDSaved = __builtin_bswap32(header.Part1.MaxIDSaved);
-+        header.Part1.ProductVersion = __builtin_bswap32(header.Part1.ProductVersion);
-+        header.Part1.ProductBuild = __builtin_bswap32(header.Part1.ProductBuild);
-+        header.Part1.Hdr1UnPackSize = __builtin_bswap32(header.Part1.Hdr1UnPackSize);
-+#endif
-         if (crc != m_FileInfo.Crc) {
-             m_Context->OutputToConsole("Crc Error in m_File");
-             return CKERR_FILECRCERROR;
+         crc = parser->ComputeCRC(sizeof(CKFileHeaderPart1), crc);
+@@ -548,6 +582,7 @@ CKERROR CKFile::ReadFileHeaders(CKBufferParser **ParserPtr) {
+ 
+             if (count > 0) {
+                 parser->Read(&pit->m_Guids[0], sizeof(CKGUID) * count);
++                SwapGuids(&pit->m_Guids[0], count);
+             }
+ 
+             if (m_Flags & CK_LOAD_CHECKDEPENDENCIES) {
+@@ -695,6 +730,7 @@ CKERROR CKFile::ReadFileData(CKBufferParser **ParserPtr) {
+             m_ManagersData.Resize(m_FileInfo.ManagerCount);
+             for (XArray<CKFileManagerData>::Iterator mit = m_ManagersData.Begin(); mit != m_ManagersData.End(); ++mit) {
+                 parser->Read(mit->Manager.d, sizeof(CKGUID));
++                SwapGuids(&mit->Manager, 1);
+                 const int managerDataSize = parser->ReadInt();
+                 if (managerDataSize > 0) {
+                     mit->data = parser->ExtractChunk(managerDataSize, this);
+@@ -752,7 +788,7 @@ CKERROR CKFile::ReadFileData(CKBufferParser **ParserPtr) {
+                         obj->Data->m_ChunkSize = dataSize >> 2;
+                     }
+ 
+-                    obj->Data->m_Data = new int[dataSize];
++                    obj->Data->m_Data = new CKChunkWord[dataSize];
+                     parser->Read(obj->Data->m_Data, dataSize);
+                     if (dataSize != fileObjectUnPackSize &&
+                         (m_FileInfo.FileWriteMode & CKFILE_CHUNKCOMPRESSED_OLD) &&
+@@ -1163,27 +1199,26 @@ CKERROR CKFile::EndSave() {
+                 fileObject.ObjPtr->m_ObjectFlags &= ~CK_OBJECT_ONLYFORFILEREFERENCE;
+             }
+ 
+-            parser->Write(&objId, sizeof(CK_ID));
+-            parser->Write(&fileObject.ObjectCid, sizeof(CK_CLASSID));
+-            parser->Write(&fileObject.FileIndex, sizeof(int));
+-            parser->Write(&nameSize, sizeof(int));
++            WriteFileInt(parser, (int) objId);
++            WriteFileInt(parser, fileObject.ObjectCid);
++            WriteFileInt(parser, fileObject.FileIndex);
++            WriteFileInt(parser, nameSize);
+             if (nameSize > 0) {
+                 parser->Write(fileObject.Name, nameSize);
+             }
+         }
+     }
+ 
+-    parser->Write(&pluginDepCount, sizeof(int));
++    WriteFileInt(parser, pluginDepCount);
+     for (int i = 0; i < pluginDepCount; ++i) {
+         CKFilePluginDependencies &pluginDep = m_PluginsDep[i];
+ 
+-        parser->Write(&pluginDep.m_PluginCategory, sizeof(int));
++        WriteFileInt(parser, pluginDep.m_PluginCategory);
+ 
+         int guidCount = pluginDep.m_Guids.Size();
+-        parser->Write(&guidCount, sizeof(int));
+-        if (guidCount > 0) {
+-            parser->Write(pluginDep.m_Guids.Begin(), guidCount * (int) sizeof(CKGUID));
+-        }
++        WriteFileInt(parser, guidCount);
++        for (int j = 0; j < guidCount; ++j)
++            WriteFileGuid(parser, pluginDep.m_Guids[j]);
+     }
+ 
+     // Included-files header:
+@@ -1191,8 +1226,8 @@ CKERROR CKFile::EndSave() {
+     // - 2nd int: included file count
+     int includedFileSize = (int) sizeof(int);
+     int includedFileCount = m_IncludedFiles.Size();
+-    parser->Write(&includedFileSize, sizeof(int));
+-    parser->Write(&includedFileCount, sizeof(int));
++    WriteFileInt(parser, includedFileSize);
++    WriteFileInt(parser, includedFileCount);
+ 
+     parser->Seek(0);
+     if ((header.Part0.FileWriteMode & (CKFILE_WHOLECOMPRESSED | CKFILE_CHUNKCOMPRESSED_OLD)) != 0) {
+@@ -1224,9 +1259,9 @@ CKERROR CKFile::EndSave() {
+     if (savedManagerCount > 0) {
+         for (int i = 0; i < savedManagerCount; ++i) {
+             CKFileManagerData &managerData = m_ManagersData[i];
+-            parser->Write(&managerData.Manager, sizeof(CKGUID));
++            WriteFileGuid(parser, managerData.Manager);
+             const int size = managerData.data ? managerData.data->ConvertToBuffer(nullptr) : 0;
+-            parser->Write(&size, sizeof(size));
++            WriteFileInt(parser, size);
+             parser->InsertChunk(managerData.data);
+             delete managerData.data;
+             managerData.data = nullptr;
+@@ -1236,7 +1271,7 @@ CKERROR CKFile::EndSave() {
+     if (fileObjectCount > 0) {
+         for (int i = 0; i < fileObjectCount; ++i) {
+             CKFileObject &fileObject = m_FileObjects[i];
+-            parser->Write(&fileObject.PrePackSize, sizeof(int));
++            WriteFileInt(parser, fileObject.PrePackSize);
+             parser->InsertChunk(fileObject.Data);
+             delete fileObject.Data;
+             fileObject.Data = nullptr;
+@@ -1257,8 +1292,12 @@ CKERROR CKFile::EndSave() {
+         }
+     }
+ 
+-    CKDWORD crc = CKComputeDataCRC((char *) &header.Part0, sizeof(CKFileHeaderPart0));
+-    crc = CKComputeDataCRC((char *) &header.Part1, sizeof(CKFileHeaderPart1), crc);
++    // The CRC covers the header as it is stored in the file.
++    CKFileHeader fileHeader = header;
++    SwapHeaderPart0(fileHeader.Part0);
++    SwapHeaderPart1(fileHeader.Part1);
++    CKDWORD crc = CKComputeDataCRC((char *) &fileHeader.Part0, sizeof(CKFileHeaderPart0));
++    crc = CKComputeDataCRC((char *) &fileHeader.Part1, sizeof(CKFileHeaderPart1), crc);
+     crc = hdr1BufferParser->ComputeCRC(hdr1BufferParser->Size(), crc);
+     crc = dataBufferParser->ComputeCRC(dataBufferParser->Size(), crc);
+     header.Part0.Crc = crc;
+@@ -1291,8 +1330,9 @@ CKERROR CKFile::EndSave() {
+ 
+     hdr1BufferParser->Seek(0);
+     dataBufferParser->Seek(0);
+-    if (fwrite(&header.Part0, sizeof(CKFileHeaderPart0), 1, fp) == 1 &&
+-        fwrite(&header.Part1, sizeof(CKFileHeaderPart1), 1, fp) == 1 &&
++    fileHeader.Part0.Crc = (CKDWORD) CKChunkWord::Swap((int) crc);
++    if (fwrite(&fileHeader.Part0, sizeof(CKFileHeaderPart0), 1, fp) == 1 &&
++        fwrite(&fileHeader.Part1, sizeof(CKFileHeaderPart1), 1, fp) == 1 &&
+         fwrite(&hdr1BufferParser->m_Buffer[hdr1BufferParser->CursorPos()], hdr1BufferParser->Size(), 1, fp) == 1 &&
+         fwrite(&dataBufferParser->m_Buffer[dataBufferParser->CursorPos()], dataBufferParser->Size(), 1, fp) == 1) {
+         int includeFileCount = m_IncludedFiles.Size();
+@@ -1302,18 +1342,17 @@ CKERROR CKFile::EndSave() {
+ 
+             XString name(CKJustFile(filename.Str()));
+             int length = name.Length();
+-            fwrite(&length, sizeof(int), 1, fp);
++            WriteFileInt(fp, (CKDWORD) length);
+             if (length != 0) {
+                 fwrite(name.Str(), length, 1, fp);
+             }
+ 
+             if (mmf.GetErrorType() == VxMMF_NoError) {
+                 CKDWORD size = (CKDWORD)mmf.GetFileSize();
+-                fwrite(&size, sizeof(CKDWORD), 1, fp);
++                WriteFileInt(fp, size);
+                 fwrite(mmf.GetBase(), size, 1, fp);
+             } else {
+-                CKDWORD stub = 0;
+-                fwrite(&stub, sizeof(CKDWORD), 1, fp);
++                WriteFileInt(fp, 0);
+             }
+         }
+         m_IncludedFiles.Clear();
+diff --git a/src/CKParameter.cpp b/src/CKParameter.cpp
+index e598eab..6a45c29 100644
+--- a/src/CKParameter.cpp
++++ b/src/CKParameter.cpp
+@@ -286,6 +286,9 @@ CKStateChunk *CKParameter::Save(CKFile *file, CKDWORD flags) {
+                 }
+                 CKGUID typeGUID = pm->ParameterTypeToGuid(type);
+                 chunk->WriteGuid(typeGUID);
++            } else if (!(m_ParamType->dwFlags & CKPARAMETERTYPE_NOENDIANCONV) && (m_Size & 3) == 0) {
++                // Load converts such buffers as words; store them the same way.
++                chunk->WriteBuffer_LEndian(m_Size, m_Buffer);
+             } else {
+                 chunk->WriteBuffer(m_Size, m_Buffer);
+             }
+diff --git a/src/CKStateChunk.cpp b/src/CKStateChunk.cpp
+index 2aebd3d..61f1897 100644
 --- a/src/CKStateChunk.cpp
 +++ b/src/CKStateChunk.cpp
-@@ -242,14 +242,28 @@
-     }
+@@ -13,6 +13,86 @@
+ XObjectPointerArray CKStateChunk::m_TempXOPA;
+ XObjectArray CKStateChunk::m_TempXOA;
  
-     int startPos = m_Data[m_ChunkParser->PrevIdentifierPos + 1];
-+#ifdef WII
-+    startPos = __builtin_bswap32(startPos);
++// Chunk data keeps the little-endian file layout on every host (see
++// CKChunkWord). The helpers below convert between that layout and the host
++// byte order; on little-endian hosts they do nothing.
++#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
++#define CK_CHUNK_BIG_ENDIAN 1
++#else
++#define CK_CHUNK_BIG_ENDIAN 0
 +#endif
-     int currentPos = startPos;
++
++// Swaps each whole 32-bit word of a buffer of byteCount bytes.
++static void SwapChunkWords32(void *data, int byteCount) {
++    if (CK_CHUNK_BIG_ENDIAN && data && byteCount >= 4)
++        CKConvertEndianArray32(data, byteCount / 4);
++}
++
++// Swaps each whole 16-bit word of a buffer of byteCount bytes.
++static void SwapChunkWords16(void *data, int byteCount) {
++    if (CK_CHUNK_BIG_ENDIAN && data && byteCount >= 2)
++        CKConvertEndianArray16(data, byteCount / 2);
++}
++
++// Words of a file buffer, which need not be aligned.
++static int LoadFileInt(const void *buffer, int index) {
++    CKChunkWord word;
++    memcpy(&word, static_cast<const char *>(buffer) + index * sizeof(int), sizeof(word));
++    return word;
++}
++
++static void StoreFileInt(void *buffer, int index, int value) {
++    CKChunkWord word;
++    word = value;
++    memcpy(static_cast<char *>(buffer) + index * sizeof(int), &word, sizeof(word));
++}
++
++// Copies count host ints into a file buffer, or file words into host ints.
++static void StoreFileInts(void *buffer, int index, const int *values, int count) {
++    memcpy(static_cast<char *>(buffer) + index * sizeof(int), values, count * sizeof(int));
++    SwapChunkWords32(static_cast<char *>(buffer) + index * sizeof(int), count * (int) sizeof(int));
++}
++
++static void LoadFileInts(int *values, const void *buffer, int index, int count) {
++    memcpy(values, static_cast<const char *>(buffer) + index * sizeof(int), count * sizeof(int));
++    SwapChunkWords32(values, count * (int) sizeof(int));
++}
++
++// Lists of a top-level chunk (Flag set) are host ints; the lists of a
++// sub-chunk live inside the parent's data and keep the file layout.
++static int IteratorListEntry(const ChunkIteratorData *it, const int *list, int index) {
++    return it->Flag ? list[index] : CKChunkWord::Swap(list[index]);
++}
++
++// 32-bit pixels are host-order ARGB words: byte offset of each channel.
++static const int kPixelBlueByte = CK_CHUNK_BIG_ENDIAN ? 3 : 0;
++static const int kPixelGreenByte = CK_CHUNK_BIG_ENDIAN ? 2 : 1;
++static const int kPixelRedByte = CK_CHUNK_BIG_ENDIAN ? 1 : 2;
++static const int kPixelAlphaByte = CK_CHUNK_BIG_ENDIAN ? 0 : 3;
++
++// Reads a 1 to 4 byte pixel the way VxMath stores it: 16 and 32-bit pixels are
++// host-order words, 24-bit pixels are blue, green, red bytes.
++static CKDWORD ReadPackedPixel(const CKBYTE *pixel, int bytesPerPixel) {
++    switch (bytesPerPixel) {
++    case 1:
++        return pixel[0];
++    case 2: {
++        CKWORD value;
++        memcpy(&value, pixel, sizeof(value));
++        return value;
++    }
++    case 3:
++        return pixel[0] | (pixel[1] << 8) | (pixel[2] << 16);
++    case 4: {
++        CKDWORD value;
++        memcpy(&value, pixel, sizeof(value));
++        return value;
++    }
++    default:
++        return 0;
++    }
++}
++
+ CKStateChunk *CreateCKStateChunk(CK_CLASSID id, CKFile *file) {
+     return new CKStateChunk(id, file);
+ }
+@@ -102,7 +182,7 @@ void CKStateChunk::Clone(CKStateChunk *chunk) {
+         m_Managers = new IntListStruct(*chunk->m_Managers);
  
-     // Phase 1: Search from startPos to the end of the list
-     if (currentPos != 0) {
--        while (m_Data[currentPos] != identifier) {
-+        int curId = m_Data[currentPos];
-+#ifdef WII
-+        curId = __builtin_bswap32(curId);
-+#endif
-+        while (curId != identifier) {
-             currentPos = m_Data[currentPos + 1];
-+#ifdef WII
-+            currentPos = __builtin_bswap32(currentPos);
-+#endif
-             if (currentPos == 0)
-                 break;
-+            curId = m_Data[currentPos];
-+#ifdef WII
-+            curId = __builtin_bswap32(curId);
-+#endif
-         }
+     if (chunk->m_Data) {
+-        m_Data = new int[m_ChunkSize];
++        m_Data = new CKChunkWord[m_ChunkSize];
+         memcpy(m_Data, chunk->m_Data, m_ChunkSize * sizeof(int));
+         if (m_ChunkParser)
+             m_ChunkParser->DataSize = m_ChunkSize;
+@@ -163,7 +243,7 @@ void CKStateChunk::CheckSize(int size) {
+         if (sz < 500)
+             sz = 500;
+         int newSize = m_ChunkParser->DataSize + sz;
+-        int *data = new int[newSize];
++        CKChunkWord *data = new CKChunkWord[newSize];
+         if (m_Data) {
+             memcpy(data, m_Data, m_ChunkParser->CurrentPos * sizeof(int));
+             delete[] m_Data;
+@@ -182,7 +262,7 @@ void CKStateChunk::CloseChunk() {
  
-         if (currentPos != 0) {
-@@ -261,10 +275,21 @@
+     if (m_ChunkSize > 0) {
+         if (m_ChunkSize + 10 < m_ChunkParser->DataSize) {
+-            int *data = new int[m_ChunkSize];
++            CKChunkWord *data = new CKChunkWord[m_ChunkSize];
+             if (m_Data) {
+                 memcpy(data, m_Data, m_ChunkSize * sizeof(int));
+                 delete[] m_Data;
+@@ -340,7 +420,7 @@ void CKStateChunk::AddChunk(CKStateChunk *chunk) {
+     int j = m_ChunkParser->CurrentPos;
+     if (m_Data[j + 1] != 0) {
+         do {
+-            int *p = &m_Data[j + 1];
++            CKChunkWord *p = &m_Data[j + 1];
+             j = *p + m_ChunkParser->CurrentPos;
+             *p = j;
+         } while (m_Data[j + 1] != 0);
+@@ -472,6 +552,7 @@ void CKStateChunk::WriteArray_LEndian(int elementCount, int elementSize, void *s
  
-     // Phase 2: Search from the beginning of the list to startPos
-     currentPos = 0;
--    while (m_Data[currentPos] != identifier) {
-+    int curId = m_Data[currentPos];
-+#ifdef WII
-+    curId = __builtin_bswap32(curId);
-+#endif
-+    while (curId != identifier) {
-         currentPos = m_Data[currentPos + 1];
-+#ifdef WII
-+        currentPos = __builtin_bswap32(currentPos);
-+#endif
-         if (currentPos == startPos)
-             return FALSE;
-+        curId = m_Data[currentPos];
-+#ifdef WII
-+        curId = __builtin_bswap32(curId);
-+#endif
-     }
+         // Copy array data
+         memcpy(&m_Data[m_ChunkParser->CurrentPos], srcData, totalBytes);
++        SwapChunkWords32(&m_Data[m_ChunkParser->CurrentPos], static_cast<int>(totalBytes));
+         m_ChunkParser->CurrentPos += static_cast<int>(dwordCount);
+     } else {
+         // Write empty array marker
+@@ -482,20 +563,27 @@ void CKStateChunk::WriteArray_LEndian(int elementCount, int elementSize, void *s
+ }
  
-     m_ChunkParser->PrevIdentifierPos = currentPos;
-@@ -283,13 +308,27 @@
-     }
- 
-     int i = 0;
--    while (m_Data[i] != identifier) {
-+    int curId = m_Data[i];
-+#ifdef WII
-+    curId = __builtin_bswap32(curId);
-+#endif
-+    while (curId != identifier) {
-         i = m_Data[i + 1];
-+#ifdef WII
-+        i = __builtin_bswap32(i);
-+#endif
-         if (i == 0)
-             return -1;
-+        curId = m_Data[i];
-+#ifdef WII
-+        curId = __builtin_bswap32(curId);
-+#endif
-     }
-     m_ChunkParser->PrevIdentifierPos = i;
-     int j = m_Data[i + 1];
-+#ifdef WII
-+    j = __builtin_bswap32(j);
-+#endif
-     if (j == 0)
-         j = m_ChunkSize;
-     m_ChunkParser->CurrentPos = i + 2;
-@@ -487,25 +526,46 @@
+ void CKStateChunk::WriteArray_LEndian16(int elementCount, int elementSize, void *srcData) {
++    const int start = m_ChunkParser ? m_ChunkParser->CurrentPos : 0;
+     WriteArray_LEndian(elementCount, elementSize, srcData);
++    // Redo the conversion with 16-bit words.
++    const int totalBytes = m_Data[start];
++    if (totalBytes > 0) {
++        SwapChunkWords32(&m_Data[start + 2], totalBytes);
++        SwapChunkWords16(&m_Data[start + 2], totalBytes);
++    }
+ }
  
  int CKStateChunk::StartManagerReadSequence(CKGUID *guid) {
      int i = m_Data[m_ChunkParser->CurrentPos++];
--    if (guid)
-+#ifdef WII
-+    i = __builtin_bswap32(i);
-+#endif
-+    if (guid) {
-         *guid = *(CKGUID *) &m_Data[m_ChunkParser->CurrentPos];
-+#ifdef WII
-+        guid->d1 = __builtin_bswap32(guid->d1);
-+        guid->d2 = __builtin_bswap32(guid->d2);
-+#endif
-+    }
+     if (guid)
+-        *guid = *(CKGUID *) &m_Data[m_ChunkParser->CurrentPos];
++        *guid = CKGUID(m_Data[m_ChunkParser->CurrentPos], m_Data[m_ChunkParser->CurrentPos + 1]);
      m_ChunkParser->CurrentPos += 2;
      return i;
  }
  
  int CKStateChunk::ReadManagerInt(CKGUID *guid) {
--    if (guid)
-+    if (guid) {
-         *guid = *(CKGUID *) &m_Data[m_ChunkParser->CurrentPos];
-+#ifdef WII
-+        guid->d1 = __builtin_bswap32(guid->d1);
-+        guid->d2 = __builtin_bswap32(guid->d2);
-+#endif
-+    }
+     if (guid)
+-        *guid = *(CKGUID *) &m_Data[m_ChunkParser->CurrentPos];
++        *guid = CKGUID(m_Data[m_ChunkParser->CurrentPos], m_Data[m_ChunkParser->CurrentPos + 1]);
      m_ChunkParser->CurrentPos += 2;
--    return m_Data[m_ChunkParser->CurrentPos++];
-+    int i = m_Data[m_ChunkParser->CurrentPos++];
-+#ifdef WII
-+    i = __builtin_bswap32(i);
-+#endif
-+    return i;
+     return m_Data[m_ChunkParser->CurrentPos++];
+ }
+@@ -525,6 +613,7 @@ int CKStateChunk::ReadArray_LEndian(void **array) {
+             }
+ 
+             memcpy(arrayData, &m_Data[parser->CurrentPos], dataSizeBytes);
++            SwapChunkWords32(arrayData, dataSizeBytes);
+             // Update parser position
+             parser->CurrentPos += dwordCount;
+             *array = arrayData;
+@@ -542,7 +631,15 @@ int CKStateChunk::ReadArray_LEndian(void **array) {
  }
  
- int CKStateChunk::ReadArray_LEndian(void **array) {
-     ChunkParser *parser = m_ChunkParser;
-     if (parser && parser->CurrentPos < m_ChunkSize) {
-         // Read array metadata
--        const int dataSizeBytes = m_Data[parser->CurrentPos++];
--        const int elementCount = m_Data[parser->CurrentPos++];
-+        int dataSizeBytes = m_Data[parser->CurrentPos++];
-+        int elementCount = m_Data[parser->CurrentPos++];
-+#ifdef WII
-+        dataSizeBytes = __builtin_bswap32(dataSizeBytes);
-+        elementCount = __builtin_bswap32(elementCount);
-+#endif
+ int CKStateChunk::ReadArray_LEndian16(void **array) {
+-    return ReadArray_LEndian(array);
++    const int start = m_ChunkParser ? m_ChunkParser->CurrentPos : 0;
++    const int count = ReadArray_LEndian(array);
++    if (count > 0 && *array) {
++        // Redo the conversion with 16-bit words.
++        const int totalBytes = m_Data[start];
++        SwapChunkWords32(*array, totalBytes);
++        SwapChunkWords16(*array, totalBytes);
++    }
++    return count;
+ }
  
-         if (dataSizeBytes > 0 && elementCount > 0) {
-             // Calculate needed dwords (4-byte chunks)
-@@ -548,7 +608,11 @@
  int CKStateChunk::ReadManagerIntSequence() {
-     if (!m_ChunkParser || m_ChunkParser->CurrentPos >= m_ChunkSize)
-         return 0;
--    return m_Data[m_ChunkParser->CurrentPos++];
-+    int val = m_Data[m_ChunkParser->CurrentPos++];
-+#ifdef WII
-+    val = __builtin_bswap32(val);
-+#endif
-+    return val;
- }
- 
- void CKStateChunk::WriteObjectID(CK_ID obj) {
-@@ -607,6 +671,9 @@
-     }
- 
-     int id = m_Data[m_ChunkParser->CurrentPos];
-+#ifdef WII
-+    id = __builtin_bswap32(id);
-+#endif
-     if (m_ChunkVersion >= CHUNK_VERSION1) {
-         ++m_ChunkParser->CurrentPos;
-         if (!m_File)
-@@ -675,6 +742,9 @@
-     }
- 
-     int count = m_Data[m_ChunkParser->CurrentPos++];
-+#ifdef WII
-+    count = __builtin_bswap32(count);
-+#endif
-     if (count == 0) {
-         if (array)
-             array->Clear();
-@@ -684,6 +754,9 @@
-     if (m_ChunkVersion < CHUNK_VERSION1) {
-         m_ChunkParser->CurrentPos += 4;
-         count = m_Data[m_ChunkParser->CurrentPos++];
-+#ifdef WII
-+        count = __builtin_bswap32(count);
-+#endif
-     }
- 
-     if (!array) {
-@@ -696,6 +769,9 @@
-         if (m_File) {
-             for (int i = 0; i < count; ++i) {
-                 int index = m_Data[m_ChunkParser->CurrentPos++];
-+#ifdef WII
-+                index = __builtin_bswap32(index);
-+#endif
-                 CK_ID id = 0;
-                 if (index >= 0 && index < m_File->m_FileObjects.Size())
-                     id = m_File->m_FileObjects[index].CreatedObject;
-@@ -703,7 +779,11 @@
-             }
-         } else {
-             for (int i = 0; i < count; ++i) {
--                CK_ID id = m_Data[m_ChunkParser->CurrentPos++];
-+                int val = m_Data[m_ChunkParser->CurrentPos++];
-+#ifdef WII
-+                val = __builtin_bswap32(val);
-+#endif
-+                CK_ID id = val;
-                 array->InsertRear(id);
-             }
-         }
-@@ -725,22 +805,35 @@
-             m_ChunkParser->CurrentPos += 4;
-             count = ReadInt();
-             m_TempXOA.Resize(count);
--            for (int i = 0; i < count; ++i)
--                m_TempXOA[i] = m_Data[m_ChunkParser->CurrentPos++];
-+            for (int i = 0; i < count; ++i) {
-+                int val = m_Data[m_ChunkParser->CurrentPos++];
-+#ifdef WII
-+                val = __builtin_bswap32(val);
-+#endif
-+                m_TempXOA[i] = val;
-+            }
-         } else {
-             m_TempXOA.Resize(count);
-             if (count + m_ChunkParser->CurrentPos <= m_ChunkSize) {
-                 if (m_File) {
-                     for (int i = 0; i < count; ++i) {
-                         int index = m_Data[m_ChunkParser->CurrentPos++];
-+#ifdef WII
-+                        index = __builtin_bswap32(index);
-+#endif
-                         CK_ID id = 0;
-                         if (index >= 0 && index < m_File->m_FileObjects.Size())
-                             id = m_File->m_FileObjects[index].CreatedObject;
-                         m_TempXOA[i] = id;
-                     }
-                 } else {
--                    for (int i = 0; i < count; ++i)
--                        m_TempXOA[i] = m_Data[m_ChunkParser->CurrentPos++];
-+                    for (int i = 0; i < count; ++i) {
-+                        int val = m_Data[m_ChunkParser->CurrentPos++];
-+#ifdef WII
-+                        val = __builtin_bswap32(val);
-+#endif
-+                        m_TempXOA[i] = val;
-+                    }
-                 }
-             }
-         }
-@@ -765,6 +858,9 @@
-             m_TempXOPA.Reserve(count);
-             for (int i = 0; i < count; ++i) {
-                 CK_ID id = m_Data[m_ChunkParser->CurrentPos++];
-+#ifdef WII
-+                id = __builtin_bswap32(id);
-+#endif
-                 CKObject *obj = context->GetObject(id);
-                 if (obj)
-                     m_TempXOPA.PushBack(obj);
-@@ -775,6 +871,9 @@
-                 if (m_File) {
-                     for (int i = 0; i < count; ++i) {
-                         int index = m_Data[m_ChunkParser->CurrentPos++];
-+#ifdef WII
-+                        index = __builtin_bswap32(index);
-+#endif
-                         CK_ID id = 0;
-                         if (index >= 0 && index < m_File->m_FileObjects.Size())
-                             id = m_File->m_FileObjects[index].CreatedObject;
-@@ -785,6 +884,9 @@
-                 } else {
-                     for (int i = 0; i < count; ++i) {
-                         CK_ID id = m_Data[m_ChunkParser->CurrentPos++];
-+#ifdef WII
-+                        id = __builtin_bswap32(id);
-+#endif
-                         CKObject *obj = context->GetObject(id);
-                         if (obj)
-                             m_TempXOPA.PushBack(obj);
-@@ -892,7 +994,11 @@
-     if (!m_ChunkParser || m_ChunkParser->CurrentPos >= m_ChunkSize)
-         return 0;
- 
--    return m_Data[m_ChunkParser->CurrentPos++];
-+    int val = m_Data[m_ChunkParser->CurrentPos++];
-+#ifdef WII
-+    val = __builtin_bswap32(val);
-+#endif
-+    return val;
- }
- 
- void CKStateChunk::WriteSubChunkSequence(CKStateChunk *sub) {
-@@ -937,23 +1043,48 @@
-     }
- 
-     int size = m_Data[m_ChunkParser->CurrentPos++];
-+#ifdef WII
-+    size = __builtin_bswap32(size);
-+#endif
-     if (size <= 0 || size + m_ChunkParser->CurrentPos > m_ChunkSize)
-         return nullptr;
- 
-     int classID = m_Data[m_ChunkParser->CurrentPos++];
-+#ifdef WII
-+    classID = __builtin_bswap32(classID);
-+#endif
-     CKStateChunk *sub = CreateCKStateChunk(classID, nullptr);
- 
-     if (m_ChunkVersion >= CHUNK_VERSION1) {
-         int version = m_Data[m_ChunkParser->CurrentPos++];
-+#ifdef WII
-+        version = __builtin_bswap32(version);
-+#endif
-         sub->m_DataVersion = (short int) (version & 0x0000FFFF);
-         sub->m_ChunkVersion = (short int) ((version & 0xFFFF0000) >> 16);
-         sub->m_ChunkSize = m_Data[m_ChunkParser->CurrentPos++];
-+#ifdef WII
-+        sub->m_ChunkSize = __builtin_bswap32(sub->m_ChunkSize);
-+#endif
-         CKBOOL hasFile = m_Data[m_ChunkParser->CurrentPos++];
-+#ifdef WII
-+        hasFile = __builtin_bswap32(hasFile);
-+#endif
-         int idCount = m_Data[m_ChunkParser->CurrentPos++];
-+#ifdef WII
-+        idCount = __builtin_bswap32(idCount);
-+#endif
-         int chunkCount = m_Data[m_ChunkParser->CurrentPos++];
-+#ifdef WII
-+        chunkCount = __builtin_bswap32(chunkCount);
-+#endif
-         int managerCount = 0;
--        if (m_ChunkVersion > 4)
-+        if (m_ChunkVersion > 4) {
+@@ -869,7 +966,7 @@ void CKStateChunk::WriteSubChunk(CKStateChunk *sub) {
+         m_Data[m_ChunkParser->CurrentPos++] = (sub->m_Chunks) ? sub->m_Chunks->Size : 0;
+         m_Data[m_ChunkParser->CurrentPos++] = (sub->m_Managers) ? sub->m_Managers->Size : 0;
+         if (sub->m_ChunkSize != 0)
+-            WriteBufferNoSize_LEndian(sub->m_ChunkSize * sizeof(int), sub->m_Data);
++            WriteBufferNoSize(sub->m_ChunkSize * sizeof(int), sub->m_Data);
+         if (sub->m_Ids && sub->m_Ids->Size > 0)
+             WriteBufferNoSize_LEndian(sub->m_Ids->Size * sizeof(int), sub->m_Ids->Data);
+         if (sub->m_Chunks && sub->m_Chunks->Size > 0)
+@@ -919,7 +1016,7 @@ void CKStateChunk::WriteSubChunkSequence(CKStateChunk *sub) {
+         m_Data[m_ChunkParser->CurrentPos++] = (sub->m_Chunks) ? sub->m_Chunks->Size : 0;
+         m_Data[m_ChunkParser->CurrentPos++] = (sub->m_Managers) ? sub->m_Managers->Size : 0;
+         if (sub->m_ChunkSize != 0)
+-            WriteBufferNoSize_LEndian(sub->m_ChunkSize * sizeof(int), sub->m_Data);
++            WriteBufferNoSize(sub->m_ChunkSize * sizeof(int), sub->m_Data);
+         if (sub->m_Ids && sub->m_Ids->Size > 0)
+             WriteBufferNoSize_LEndian(sub->m_Ids->Size * sizeof(int), sub->m_Ids->Data);
+         if (sub->m_Chunks && sub->m_Chunks->Size > 0)
+@@ -955,7 +1052,7 @@ CKStateChunk *CKStateChunk::ReadSubChunk() {
+         if (m_ChunkVersion > 4)
              managerCount = m_Data[m_ChunkParser->CurrentPos++];
-+#ifdef WII
-+            managerCount = __builtin_bswap32(managerCount);
-+#endif
-+        }
          if (sub->m_ChunkSize != 0) {
-             sub->m_Data = new int[sub->m_ChunkSize];
+-            sub->m_Data = new int[sub->m_ChunkSize];
++            sub->m_Data = new CKChunkWord[sub->m_ChunkSize];
              if (!sub->m_Data) {
-@@ -973,6 +1104,11 @@
+                 delete sub;
+                 return nullptr;
+@@ -972,7 +1069,7 @@ CKStateChunk *CKStateChunk::ReadSubChunk() {
+                 delete sub;
                  return nullptr;
              }
-             ReadAndFillBuffer(idCount * sizeof(int), sub->m_Ids->Data);
-+#ifdef WII
-+            for(int i=0; i<idCount; i++) {
-+                sub->m_Ids->Data[i] = (int)__builtin_bswap32((uint32_t)sub->m_Ids->Data[i]);
-+            }
-+#endif
+-            ReadAndFillBuffer(idCount * sizeof(int), sub->m_Ids->Data);
++            ReadAndFillBuffer_LEndian(idCount * sizeof(int), sub->m_Ids->Data);
          }
  
          if (chunkCount > 0) {
-@@ -985,6 +1121,11 @@
+@@ -984,7 +1081,7 @@ CKStateChunk *CKStateChunk::ReadSubChunk() {
+                 delete sub;
                  return nullptr;
              }
-             ReadAndFillBuffer(chunkCount * sizeof(int), sub->m_Chunks->Data);
-+#ifdef WII
-+            for(int i=0; i<chunkCount; i++) {
-+                sub->m_Chunks->Data[i] = (int)__builtin_bswap32((uint32_t)sub->m_Chunks->Data[i]);
-+            }
-+#endif
+-            ReadAndFillBuffer(chunkCount * sizeof(int), sub->m_Chunks->Data);
++            ReadAndFillBuffer_LEndian(chunkCount * sizeof(int), sub->m_Chunks->Data);
          }
  
          if (managerCount > 0) {
-@@ -997,6 +1138,11 @@
+@@ -996,7 +1093,7 @@ CKStateChunk *CKStateChunk::ReadSubChunk() {
+                 delete sub;
                  return nullptr;
              }
-             ReadAndFillBuffer(managerCount * sizeof(int), sub->m_Managers->Data);
-+#ifdef WII
-+            for(int i=0; i<managerCount; i++) {
-+                sub->m_Managers->Data[i] = (int)__builtin_bswap32((uint32_t)sub->m_Managers->Data[i]);
-+            }
-+#endif
+-            ReadAndFillBuffer(managerCount * sizeof(int), sub->m_Managers->Data);
++            ReadAndFillBuffer_LEndian(managerCount * sizeof(int), sub->m_Managers->Data);
          }
  
          if (hasFile && m_File)
-@@ -1039,7 +1185,11 @@
- CKWORD CKStateChunk::ReadWord() {
-     if (!m_ChunkParser || m_ChunkParser->CurrentPos >= m_ChunkSize)
-         return 0;
--    return m_Data[m_ChunkParser->CurrentPos++];
-+    int val = m_Data[m_ChunkParser->CurrentPos++];
-+#ifdef WII
-+    val = __builtin_bswap32(val);
-+#endif
-+    return (CKWORD)val;
- }
- 
- void CKStateChunk::WriteInt(int data) {
-@@ -1053,7 +1203,11 @@
-             m_File->m_Context->OutputToConsole("Chunk Read error");
-         return 0;
-     }
--    return m_Data[m_ChunkParser->CurrentPos++];
-+    int val = m_Data[m_ChunkParser->CurrentPos++];
-+#ifdef WII
-+    val = (int)__builtin_bswap32((uint32_t)val);
-+#endif
-+    return val;
- }
- 
- void CKStateChunk::WriteDword(CKDWORD data) {
-@@ -1097,7 +1251,14 @@
+@@ -1008,7 +1105,7 @@ CKStateChunk *CKStateChunk::ReadSubChunk() {
+         ++m_ChunkParser->CurrentPos;
+         if (sub->m_ChunkSize == 0)
+             return sub;
+-        sub->m_Data = new int[sub->m_ChunkSize];
++        sub->m_Data = new CKChunkWord[sub->m_ChunkSize];
+         if (sub->m_Data) {
+             memcpy(sub->m_Data, &m_Data[m_ChunkParser->CurrentPos], sub->m_ChunkSize * sizeof(int));
+             m_ChunkParser->CurrentPos += sub->m_ChunkSize;
+@@ -1097,14 +1194,19 @@ float CKStateChunk::ReadFloat() {
              m_File->m_Context->OutputToConsole("Chunk Read error");
          return 0;
      }
 -    return *(float *) &m_Data[m_ChunkParser->CurrentPos++];
-+    uint32_t val;
-+    memcpy(&val, &m_Data[m_ChunkParser->CurrentPos++], sizeof(uint32_t));
-+#ifdef WII
-+    val = __builtin_bswap32(val);
-+#endif
-+    union { float f; uint32_t i; } u;
-+    u.i = val;
-+    return u.f;
++    const int bits = m_Data[m_ChunkParser->CurrentPos++];
++    float value;
++    memcpy(&value, &bits, sizeof(value));
++    return value;
  }
  
- void CKStateChunk::WriteBuffer(int size, void *buf) {
-@@ -1148,6 +1309,9 @@
+-void CKStateChunk::WriteBuffer(int size, void *buf) {
+-    WriteBuffer_LEndian(size, buf);
++void CKStateChunk::WriteBuffer_LEndian(int size, void *buf) {
++    WriteBuffer(size, buf);
++    if (buf && size > 0)
++        SwapChunkWords32(&m_Data[m_ChunkParser->CurrentPos - (size + 3) / (int) sizeof(int)], size);
+ }
  
-     CKBYTE *buf = nullptr;
-     int size = m_Data[m_ChunkParser->CurrentPos];
-+#ifdef WII
-+    size = __builtin_bswap32(size);
-+#endif
-     int sz = (size + 3) / sizeof(int);
-     ++m_ChunkParser->CurrentPos;
-     if (sz + m_ChunkParser->CurrentPos <= m_ChunkSize) {
-@@ -1180,6 +1344,9 @@
+-void CKStateChunk::WriteBuffer_LEndian(int size, void *buf) {
++void CKStateChunk::WriteBuffer(int size, void *buf) {
+     if (!buf) {
+         // IDA: CheckSize(4) for null buffer
+         CheckSize(sizeof(int));
+@@ -1119,14 +1221,12 @@ void CKStateChunk::WriteBuffer_LEndian(int size, void *buf) {
+ }
+ 
+ void CKStateChunk::WriteBuffer_LEndian16(int size, void *buf) {
+-    WriteBuffer_LEndian(size, buf);
++    WriteBuffer(size, buf);
++    if (buf && size > 0)
++        SwapChunkWords16(&m_Data[m_ChunkParser->CurrentPos - (size + 3) / (int) sizeof(int)], size);
+ }
+ 
+ void CKStateChunk::WriteBufferNoSize(int size, void *buf) {
+-    WriteBufferNoSize_LEndian(size, buf);
+-}
+-
+-void CKStateChunk::WriteBufferNoSize_LEndian(int size, void *buf) {
+     if (buf) {
+         int sz = (size + 3) / sizeof(int);
+         CheckSize(sz * sizeof(int));
+@@ -1135,8 +1235,16 @@ void CKStateChunk::WriteBufferNoSize_LEndian(int size, void *buf) {
+     }
+ }
+ 
++void CKStateChunk::WriteBufferNoSize_LEndian(int size, void *buf) {
++    WriteBufferNoSize(size, buf);
++    if (buf && size > 0)
++        SwapChunkWords32(&m_Data[m_ChunkParser->CurrentPos - (size + 3) / (int) sizeof(int)], size);
++}
++
+ void CKStateChunk::WriteBufferNoSize_LEndian16(int size, void *buf) {
+-    WriteBufferNoSize_LEndian(size, buf);
++    WriteBufferNoSize(size, buf);
++    if (buf && size > 0)
++        SwapChunkWords16(&m_Data[m_ChunkParser->CurrentPos - (size + 3) / (int) sizeof(int)], size);
+ }
+ 
+ int CKStateChunk::ReadBuffer(void **buffer) {
+@@ -1168,11 +1276,25 @@ int CKStateChunk::ReadBuffer(void **buffer) {
+     return 0;
+ }
+ 
+-void CKStateChunk::ReadAndFillBuffer(void *buffer) {
+-    ReadAndFillBuffer_LEndian(buffer);
++// Size of the buffer that the unsized ReadAndFillBuffer at pos copies, or 0
++// when it copies nothing.
++static int StoredBufferSize(const CKChunkWord *data, int pos, int chunkSize) {
++    if (!data || pos < 0 || pos >= chunkSize)
++        return 0;
++    const int size = data[pos];
++    if (size <= 0 || static_cast<size_t>(size) > static_cast<size_t>(chunkSize - pos - 1) * sizeof(int))
++        return 0;
++    return size;
+ }
+ 
+ void CKStateChunk::ReadAndFillBuffer_LEndian(void *buffer) {
++    const int size = m_ChunkParser ? StoredBufferSize(m_Data, m_ChunkParser->CurrentPos, m_ChunkSize) : 0;
++    ReadAndFillBuffer(buffer);
++    if (buffer)
++        SwapChunkWords32(buffer, size);
++}
++
++void CKStateChunk::ReadAndFillBuffer(void *buffer) {
+     if (!m_ChunkParser || m_ChunkParser->CurrentPos >= m_ChunkSize) {
+         if (m_File)
+             m_File->m_Context->OutputToConsole("Chunk Read error");
+@@ -1199,14 +1321,21 @@ void CKStateChunk::ReadAndFillBuffer_LEndian(void *buffer) {
+ }
+ 
+ void CKStateChunk::ReadAndFillBuffer_LEndian16(void *buffer) {
+-    ReadAndFillBuffer_LEndian(buffer);
++    const int size = m_ChunkParser ? StoredBufferSize(m_Data, m_ChunkParser->CurrentPos, m_ChunkSize) : 0;
++    ReadAndFillBuffer(buffer);
++    if (buffer)
++        SwapChunkWords16(buffer, size);
+ }
+ 
+-void CKStateChunk::ReadAndFillBuffer(int size, void *buffer) {
+-    ReadAndFillBuffer_LEndian(size, buffer);
++void CKStateChunk::ReadAndFillBuffer_LEndian(int size, void *buffer) {
++    const int start = m_ChunkParser ? m_ChunkParser->CurrentPos : 0;
++    ReadAndFillBuffer(size, buffer);
++    // Convert only what was copied: a failed read moves to the chunk end.
++    if (buffer && size > 0 && m_ChunkParser && m_ChunkParser->CurrentPos == start + (size + 3) / (int) sizeof(int))
++        SwapChunkWords32(buffer, size);
+ }
+ 
+-void CKStateChunk::ReadAndFillBuffer_LEndian(int size, void *buffer) {
++void CKStateChunk::ReadAndFillBuffer(int size, void *buffer) {
+     if (!m_ChunkParser || size < 0) {
+         if (m_File)
+             m_File->m_Context->OutputToConsole("Chunk Read error");
+@@ -1234,7 +1363,10 @@ void CKStateChunk::ReadAndFillBuffer_LEndian(int size, void *buffer) {
+ }
+ 
+ void CKStateChunk::ReadAndFillBuffer_LEndian16(int size, void *buffer) {
+-    ReadAndFillBuffer_LEndian(size, buffer);
++    const int start = m_ChunkParser ? m_ChunkParser->CurrentPos : 0;
++    ReadAndFillBuffer(size, buffer);
++    if (buffer && size > 0 && m_ChunkParser && m_ChunkParser->CurrentPos == start + (size + 3) / (int) sizeof(int))
++        SwapChunkWords16(buffer, size);
+ }
+ 
+ void CKStateChunk::WriteString(CKSTRING str) {
+@@ -1310,6 +1442,7 @@ void CKStateChunk::ReadString(XString &str) {
+ void CKStateChunk::WriteVector(const VxVector &v) {
+     CheckSize(sizeof(VxVector));
+     memcpy(&m_Data[m_ChunkParser->CurrentPos], &v, sizeof(VxVector));
++    SwapChunkWords32(&m_Data[m_ChunkParser->CurrentPos], sizeof(VxVector));
+     m_ChunkParser->CurrentPos += sizeof(VxVector) / sizeof(int);
+ }
+ 
+@@ -1327,6 +1460,7 @@ void CKStateChunk::ReadVector(VxVector &v) {
      }
  
-     int size = m_Data[m_ChunkParser->CurrentPos];
-+#ifdef WII
-+    size = __builtin_bswap32(size);
-+#endif
-     ++m_ChunkParser->CurrentPos;
-     // The destination size is unknown here, but the stored size must stay
-     // within the chunk: the native copy reads past the data otherwise.
-@@ -1263,6 +1430,9 @@
- 
-     char *s = nullptr;
-     int size = m_Data[m_ChunkParser->CurrentPos];
-+#ifdef WII
-+    size = __builtin_bswap32(size);
-+#endif
-     int sz = (size + 3) / sizeof(int);
-     ++m_ChunkParser->CurrentPos;
-     if (sz + m_ChunkParser->CurrentPos <= m_ChunkSize) {
-@@ -1290,6 +1460,9 @@
-     }
- 
-     CKDWORD length = m_Data[m_ChunkParser->CurrentPos++];
-+#ifdef WII
-+    length = __builtin_bswap32(length);
-+#endif
- 
-     CKDWORD dwordCount = (length + 3) >> 2; // (length+3)/4
- 
-@@ -1326,7 +1499,17 @@
-         return;
-     }
- 
--    memcpy(&v, &m_Data[m_ChunkParser->CurrentPos], sizeof(VxVector));
-+    uint32_t raw[3];
-+    memcpy(&raw, &m_Data[m_ChunkParser->CurrentPos], sizeof(VxVector));
-+#ifdef WII
-+    raw[0] = __builtin_bswap32(raw[0]);
-+    raw[1] = __builtin_bswap32(raw[1]);
-+    raw[2] = __builtin_bswap32(raw[2]);
-+#endif
-+    union { float f; uint32_t i; } u;
-+    u.i = raw[0]; v.x = u.f;
-+    u.i = raw[1]; v.y = u.f;
-+    u.i = raw[2]; v.z = u.f;
+     memcpy(&v, &m_Data[m_ChunkParser->CurrentPos], sizeof(VxVector));
++    SwapChunkWords32(&v, sizeof(VxVector));
      m_ChunkParser->CurrentPos += vectorInts;
  }
  
-@@ -1349,7 +1532,19 @@
-         return;
+@@ -1338,6 +1472,7 @@ void CKStateChunk::ReadVector(VxVector *v) {
+ void CKStateChunk::WriteMatrix(const VxMatrix &mat) {
+     CheckSize(sizeof(VxMatrix));
+     memcpy(&m_Data[m_ChunkParser->CurrentPos], &mat, sizeof(VxMatrix));
++    SwapChunkWords32(&m_Data[m_ChunkParser->CurrentPos], sizeof(VxMatrix));
+     m_ChunkParser->CurrentPos += sizeof(VxMatrix) / sizeof(int);
+ }
+ 
+@@ -1350,6 +1485,7 @@ void CKStateChunk::ReadMatrix(VxMatrix &mat) {
      }
  
--    memcpy(&mat, &m_Data[m_ChunkParser->CurrentPos], sizeof(VxMatrix));
-+    uint32_t raw[16];
-+    memcpy(&raw, &m_Data[m_ChunkParser->CurrentPos], sizeof(VxMatrix));
-+#ifdef WII
-+    for(int i = 0; i < 16; i++) {
-+        raw[i] = __builtin_bswap32(raw[i]);
-+    }
-+#endif
-+    union { float f; uint32_t ui; } u;
-+    float* fmat = (float*)&mat;
-+    for(int i = 0; i < 16; i++) {
-+        u.ui = raw[i];
-+        fmat[i] = u.f;
-+    }
+     memcpy(&mat, &m_Data[m_ChunkParser->CurrentPos], sizeof(VxMatrix));
++    SwapChunkWords32(&mat, sizeof(VxMatrix));
      m_ChunkParser->CurrentPos += matrixInts;
  }
  
-@@ -1427,6 +1622,9 @@
+@@ -1376,8 +1512,6 @@ int CKStateChunk::ConvertToBuffer(void *buffer) {
+     }
+ 
+     if (buffer) {
+-        int *buf = (int *) buffer;
+-
+         // Temporarily OR options/classID into version fields for serialization
+         short savedChunkVersion = m_ChunkVersion;
+         short savedDataVersion = m_DataVersion;
+@@ -1385,28 +1519,27 @@ int CKStateChunk::ConvertToBuffer(void *buffer) {
+         m_DataVersion |= (m_ChunkClassID << 8);
+ 
+         // Write header: [DataVersion | ChunkVersion<<16]
+-        *(short *)buf = m_DataVersion;
+-        *((short *)buf + 1) = m_ChunkVersion;
+-        buf[1] = m_ChunkSize;
++        StoreFileInt(buffer, 0, (CKWORD) m_DataVersion | ((CKDWORD) (CKWORD) m_ChunkVersion << 16));
++        StoreFileInt(buffer, 1, m_ChunkSize);
+ 
+-        // Copy main data
+-        memcpy(&buf[2], m_Data, m_ChunkSize * sizeof(int));
+-        int *pos = &buf[m_ChunkSize + 2];
++        // Copy main data (already in the file layout)
++        memcpy(static_cast<char *>(buffer) + 2 * sizeof(int), m_Data, m_ChunkSize * sizeof(int));
++        int pos = m_ChunkSize + 2;
+ 
+         // Write lists with size prefix
+         if (m_Ids) {
+-            *pos++ = m_Ids->Size;
+-            memcpy(pos, m_Ids->Data, m_Ids->Size * sizeof(int));
++            StoreFileInt(buffer, pos++, m_Ids->Size);
++            StoreFileInts(buffer, pos, m_Ids->Data, m_Ids->Size);
+             pos += m_Ids->Size;
+         }
+         if (m_Chunks) {
+-            *pos++ = m_Chunks->Size;
+-            memcpy(pos, m_Chunks->Data, m_Chunks->Size * sizeof(int));
++            StoreFileInt(buffer, pos++, m_Chunks->Size);
++            StoreFileInts(buffer, pos, m_Chunks->Data, m_Chunks->Size);
+             pos += m_Chunks->Size;
+         }
+         if (m_Managers) {
+-            *pos++ = m_Managers->Size;
+-            memcpy(pos, m_Managers->Data, m_Managers->Size * sizeof(int));
++            StoreFileInt(buffer, pos++, m_Managers->Size);
++            StoreFileInts(buffer, pos, m_Managers->Data, m_Managers->Size);
+             pos += m_Managers->Size;
+         }
+ 
+@@ -1423,10 +1556,9 @@ CKBOOL CKStateChunk::ConvertFromBuffer(void *buffer) {
+         return FALSE;
+ 
+     int pos = 0;
+-    int *buf = (int *) buffer;
  
      Clear();
-     int val = buf[pos++];
-+#ifdef WII
-+    val = (int)__builtin_bswap32((uint32_t)val);
-+#endif
+-    int val = buf[pos++];
++    int val = LoadFileInt(buffer, pos++);
  
      // Extract raw version data - do NOT mask off high bytes yet
      // as VERSION3/4 formats encode options and classID in the high bytes
-@@ -1439,10 +1637,22 @@
+@@ -1438,16 +1570,16 @@ CKBOOL CKStateChunk::ConvertFromBuffer(void *buffer) {
+     m_ChunkVersion = (short) (rawChunkVersion & 0x00FF);
  
      if (m_ChunkVersion < CHUNK_VERSION2) {
-         m_ChunkClassID = buf[pos++];
-+#ifdef WII
-+        m_ChunkClassID = __builtin_bswap32(m_ChunkClassID);
-+#endif
-         m_ChunkSize = buf[pos++];
-+#ifdef WII
-+        m_ChunkSize = __builtin_bswap32(m_ChunkSize);
-+#endif
+-        m_ChunkClassID = buf[pos++];
+-        m_ChunkSize = buf[pos++];
++        m_ChunkClassID = LoadFileInt(buffer, pos++);
++        m_ChunkSize = LoadFileInt(buffer, pos++);
          ++pos;
-         int idCount = buf[pos++];
-+#ifdef WII
-+        idCount = __builtin_bswap32(idCount);
-+#endif
-         int chunkCount = buf[pos++];
-+#ifdef WII
-+        chunkCount = __builtin_bswap32(chunkCount);
-+#endif
+-        int idCount = buf[pos++];
+-        int chunkCount = buf[pos++];
++        int idCount = LoadFileInt(buffer, pos++);
++        int chunkCount = LoadFileInt(buffer, pos++);
  
          if (m_ChunkSize != 0) {
-             m_Data = new int[m_ChunkSize];
-@@ -1459,6 +1669,11 @@
+-            m_Data = new int[m_ChunkSize];
++            m_Data = new CKChunkWord[m_ChunkSize];
+             if (m_Data) {
+-                memcpy(m_Data, &buf[pos], m_ChunkSize * sizeof(int));
++                memcpy(m_Data, static_cast<char *>(buffer) + pos * sizeof(int), m_ChunkSize * sizeof(int));
+                 pos += m_ChunkSize;
+             }
+         }
+@@ -1458,7 +1590,7 @@ CKBOOL CKStateChunk::ConvertFromBuffer(void *buffer) {
+             m_Ids->Size = idCount;
              m_Ids->Data = new int[idCount];
              if (m_Ids->Data) {
-                 memcpy(m_Ids->Data, &buf[pos], idCount * sizeof(int));
-+#ifdef WII
-+                for(int i = 0; i < idCount; i++) {
-+                    m_Ids->Data[i] = (int)__builtin_bswap32((uint32_t)m_Ids->Data[i]);
-+                }
-+#endif
+-                memcpy(m_Ids->Data, &buf[pos], idCount * sizeof(int));
++                LoadFileInts(m_Ids->Data, buffer, pos, idCount);
                  pos += idCount;
              }
          }
-@@ -1470,6 +1685,11 @@
+@@ -1469,7 +1601,7 @@ CKBOOL CKStateChunk::ConvertFromBuffer(void *buffer) {
+             m_Chunks->Size = chunkCount;
              m_Chunks->Data = new int[chunkCount];
              if (m_Chunks->Data) {
-                 memcpy(m_Chunks->Data, &buf[pos], chunkCount * sizeof(int));
-+#ifdef WII
-+                for(int i = 0; i < chunkCount; i++) {
-+                    m_Chunks->Data[i] = (int)__builtin_bswap32((uint32_t)m_Chunks->Data[i]);
-+                }
-+#endif
+-                memcpy(m_Chunks->Data, &buf[pos], chunkCount * sizeof(int));
++                LoadFileInts(m_Chunks->Data, buffer, pos, chunkCount);
                  pos += chunkCount;
              }
          }
-@@ -1478,11 +1698,26 @@
+@@ -1477,17 +1609,17 @@ CKBOOL CKStateChunk::ConvertFromBuffer(void *buffer) {
+         m_File = nullptr;
          return TRUE;
      } else if (m_ChunkVersion == CHUNK_VERSION2) {
-         m_ChunkClassID = buf[pos++];
-+#ifdef WII
-+        m_ChunkClassID = __builtin_bswap32(m_ChunkClassID);
-+#endif
-         m_ChunkSize = buf[pos++];
-+#ifdef WII
-+        m_ChunkSize = __builtin_bswap32(m_ChunkSize);
-+#endif
+-        m_ChunkClassID = buf[pos++];
+-        m_ChunkSize = buf[pos++];
++        m_ChunkClassID = LoadFileInt(buffer, pos++);
++        m_ChunkSize = LoadFileInt(buffer, pos++);
          ++pos;
-         int idCount = buf[pos++];
-+#ifdef WII
-+        idCount = __builtin_bswap32(idCount);
-+#endif
-         int chunkCount = buf[pos++];
-+#ifdef WII
-+        chunkCount = __builtin_bswap32(chunkCount);
-+#endif
-         int managerCount = buf[pos++];
-+#ifdef WII
-+        managerCount = __builtin_bswap32(managerCount);
-+#endif
+-        int idCount = buf[pos++];
+-        int chunkCount = buf[pos++];
+-        int managerCount = buf[pos++];
++        int idCount = LoadFileInt(buffer, pos++);
++        int chunkCount = LoadFileInt(buffer, pos++);
++        int managerCount = LoadFileInt(buffer, pos++);
  
          if (m_ChunkSize != 0) {
-             m_Data = new int[m_ChunkSize];
-@@ -1499,6 +1734,11 @@
+-            m_Data = new int[m_ChunkSize];
++            m_Data = new CKChunkWord[m_ChunkSize];
+             if (m_Data) {
+-                memcpy(m_Data, &buf[pos], m_ChunkSize * sizeof(int));
++                memcpy(m_Data, static_cast<char *>(buffer) + pos * sizeof(int), m_ChunkSize * sizeof(int));
+                 pos += m_ChunkSize;
+             }
+         }
+@@ -1498,7 +1630,7 @@ CKBOOL CKStateChunk::ConvertFromBuffer(void *buffer) {
+             m_Ids->Size = idCount;
              m_Ids->Data = new int[idCount];
              if (m_Ids->Data) {
-                 memcpy(m_Ids->Data, &buf[pos], idCount * sizeof(int));
-+#ifdef WII
-+                for(int i = 0; i < idCount; i++) {
-+                    m_Ids->Data[i] = (int)__builtin_bswap32((uint32_t)m_Ids->Data[i]);
-+                }
-+#endif
+-                memcpy(m_Ids->Data, &buf[pos], idCount * sizeof(int));
++                LoadFileInts(m_Ids->Data, buffer, pos, idCount);
                  pos += idCount;
              }
          }
-@@ -1510,6 +1750,11 @@
+@@ -1509,7 +1641,7 @@ CKBOOL CKStateChunk::ConvertFromBuffer(void *buffer) {
+             m_Chunks->Size = chunkCount;
              m_Chunks->Data = new int[chunkCount];
              if (m_Chunks->Data) {
-                 memcpy(m_Chunks->Data, &buf[pos], chunkCount * sizeof(int));
-+#ifdef WII
-+                for(int i = 0; i < chunkCount; i++) {
-+                    m_Chunks->Data[i] = (int)__builtin_bswap32((uint32_t)m_Chunks->Data[i]);
-+                }
-+#endif
+-                memcpy(m_Chunks->Data, &buf[pos], chunkCount * sizeof(int));
++                LoadFileInts(m_Chunks->Data, buffer, pos, chunkCount);
                  pos += chunkCount;
              }
          }
-@@ -1521,6 +1766,11 @@
+@@ -1520,7 +1652,7 @@ CKBOOL CKStateChunk::ConvertFromBuffer(void *buffer) {
+             m_Managers->Size = managerCount;
              m_Managers->Data = new int[managerCount];
              if (m_Managers->Data) {
-                 memcpy(m_Managers->Data, &buf[pos], managerCount * sizeof(int));
-+#ifdef WII
-+                for(int i = 0; i < managerCount; i++) {
-+                    m_Managers->Data[i] = (int)__builtin_bswap32((uint32_t)m_Managers->Data[i]);
-+                }
-+#endif
+-                memcpy(m_Managers->Data, &buf[pos], managerCount * sizeof(int));
++                LoadFileInts(m_Managers->Data, buffer, pos, managerCount);
                  pos += managerCount;
              }
          }
-@@ -1536,6 +1786,9 @@
+@@ -1535,11 +1667,11 @@ CKBOOL CKStateChunk::ConvertFromBuffer(void *buffer) {
+         CKBYTE chunkOptions = (rawChunkVersion & 0xFF00) >> 8;
          m_ChunkClassID = (rawDataVersion & 0xFF00) >> 8;
  
-         m_ChunkSize = buf[pos++];
-+#ifdef WII
-+        m_ChunkSize = __builtin_bswap32(m_ChunkSize);
-+#endif
+-        m_ChunkSize = buf[pos++];
++        m_ChunkSize = LoadFileInt(buffer, pos++);
          if (m_ChunkSize != 0) {
-             m_Data = new int[m_ChunkSize];
+-            m_Data = new int[m_ChunkSize];
++            m_Data = new CKChunkWord[m_ChunkSize];
              if (m_Data) {
-@@ -1549,6 +1802,9 @@
+-                memcpy(m_Data, &buf[pos], m_ChunkSize * sizeof(int));
++                memcpy(m_Data, static_cast<char *>(buffer) + pos * sizeof(int), m_ChunkSize * sizeof(int));
+                 pos += m_ChunkSize;
+             }
+         }
+@@ -1548,42 +1680,42 @@ CKBOOL CKStateChunk::ConvertFromBuffer(void *buffer) {
+             m_File = nullptr;
  
          if ((chunkOptions & CHNK_OPTION_IDS) != 0) {
-             int idCount = buf[pos++];
-+#ifdef WII
-+            idCount = __builtin_bswap32(idCount);
-+#endif
+-            int idCount = buf[pos++];
++            int idCount = LoadFileInt(buffer, pos++);
              if (idCount > 0) {
                  m_Ids = new IntListStruct;
                  m_Ids->AllocatedSize = idCount;
-@@ -1556,6 +1812,11 @@
+                 m_Ids->Size = idCount;
                  m_Ids->Data = new int[idCount];
                  if (m_Ids->Data) {
-                     memcpy(m_Ids->Data, &buf[pos], idCount * sizeof(int));
-+#ifdef WII
-+                    for(int i = 0; i < idCount; i++) {
-+                        m_Ids->Data[i] = (int)__builtin_bswap32((uint32_t)m_Ids->Data[i]);
-+                    }
-+#endif
+-                    memcpy(m_Ids->Data, &buf[pos], idCount * sizeof(int));
++                    LoadFileInts(m_Ids->Data, buffer, pos, idCount);
                      pos += idCount;
                  }
              }
-@@ -1563,6 +1824,9 @@
+         }
  
          if ((chunkOptions & CHNK_OPTION_CHN) != 0) {
-             int chunkCount = buf[pos++];
-+#ifdef WII
-+            chunkCount = __builtin_bswap32(chunkCount);
-+#endif
+-            int chunkCount = buf[pos++];
++            int chunkCount = LoadFileInt(buffer, pos++);
              if (chunkCount > 0) {
                  m_Chunks = new IntListStruct;
                  m_Chunks->AllocatedSize = chunkCount;
-@@ -1570,6 +1834,11 @@
+                 m_Chunks->Size = chunkCount;
                  m_Chunks->Data = new int[chunkCount];
                  if (m_Chunks->Data) {
-                     memcpy(m_Chunks->Data, &buf[pos], chunkCount * sizeof(int));
-+#ifdef WII
-+                    for(int i = 0; i < chunkCount; i++) {
-+                        m_Chunks->Data[i] = (int)__builtin_bswap32((uint32_t)m_Chunks->Data[i]);
-+                    }
-+#endif
+-                    memcpy(m_Chunks->Data, &buf[pos], chunkCount * sizeof(int));
++                    LoadFileInts(m_Chunks->Data, buffer, pos, chunkCount);
                      pos += chunkCount;
                  }
              }
-@@ -1577,6 +1846,9 @@
+         }
  
          if ((chunkOptions & CHNK_OPTION_MAN) != 0) {
-             int managerCount = buf[pos++];
-+#ifdef WII
-+            managerCount = __builtin_bswap32(managerCount);
-+#endif
+-            int managerCount = buf[pos++];
++            int managerCount = LoadFileInt(buffer, pos++);
              if (managerCount > 0) {
                  m_Managers = new IntListStruct;
                  m_Managers->AllocatedSize = managerCount;
-@@ -1584,6 +1856,11 @@
+                 m_Managers->Size = managerCount;
                  m_Managers->Data = new int[managerCount];
                  if (m_Managers->Data) {
-                     memcpy(m_Managers->Data, &buf[pos], managerCount * sizeof(int));
-+#ifdef WII
-+                    for(int i = 0; i < managerCount; i++) {
-+                        m_Managers->Data[i] = (int)__builtin_bswap32((uint32_t)m_Managers->Data[i]);
-+                    }
-+#endif
+-                    memcpy(m_Managers->Data, &buf[pos], managerCount * sizeof(int));
++                    LoadFileInts(m_Managers->Data, buffer, pos, managerCount);
                      pos += managerCount;
                  }
              }
-@@ -2569,18 +2846,40 @@
+@@ -1776,19 +1908,17 @@ void CKStateChunk::WriteReaderBitmap(const VxImageDescEx &desc, CKBitmapReader *
+ 
+     if (alphaIsSaved || !desc.AlphaMask) {
+         WriteDword(1);
+-        WriteBufferNoSize_LEndian(sizeof(CKFileExtension), bp->m_Ext.m_Data);
++        WriteBufferNoSize(sizeof(CKFileExtension), bp->m_Ext.m_Data);
+         WriteGuid(bp->m_ReaderGuid);
+-        WriteBuffer_LEndian(static_cast<int>(savedSize), savedBuffer);
++        WriteBuffer(static_cast<int>(savedSize), savedBuffer);
+         reader->ReleaseMemory(savedBuffer);
+         return;
+     }
+ 
+     WriteDword(2);
+-    CKDWORD extensionValue = 0;
+-    memcpy(&extensionValue, bp->m_Ext.m_Data, sizeof(extensionValue));
+-    WriteDword(extensionValue);
++    WriteBufferNoSize(sizeof(CKDWORD), bp->m_Ext.m_Data);
+     WriteGuid(bp->m_ReaderGuid);
+-    WriteBuffer_LEndian(static_cast<int>(savedSize), savedBuffer);
++    WriteBuffer(static_cast<int>(savedSize), savedBuffer);
+ 
+     CKBYTE alphaHistogram[256];
+     memset(alphaHistogram, 0, sizeof(alphaHistogram));
+@@ -1804,7 +1934,7 @@ void CKStateChunk::WriteReaderBitmap(const VxImageDescEx &desc, CKBitmapReader *
+     CKBYTE *pixelCursor = desc.Image;
+     const int lutShift = static_cast<int>(g_AlphaShift_LSB) - static_cast<int>(g_AlphaQuantShift_MSB);
+     while (totalDwords-- > 0) {
+-        CKDWORD packedPixel = *reinterpret_cast<const CKDWORD *>(pixelCursor);
++        CKDWORD packedPixel = ReadPackedPixel(pixelCursor, bytesPerPixel);
+         CKBYTE histogramIndex = static_cast<CKBYTE>((packedPixel & alphaMask) >> lutShift);
+         alphaHistogram[histogramIndex] = 1;
+         pixelCursor += bytesPerPixel;
+@@ -1833,7 +1963,7 @@ void CKStateChunk::WriteReaderBitmap(const VxImageDescEx &desc, CKBitmapReader *
+             CKBYTE *srcRow = desc.Image;
+             for (int y = 0; y < desc.Height; ++y) {
+                 CKBYTE *dst = alphaPlane + static_cast<size_t>(y) * desc.Width;
+-                CKBYTE *src = srcRow + 3;
++                CKBYTE *src = srcRow + kPixelAlphaByte;
+                 for (int x = 0; x < desc.Width; ++x) {
+                     dst[x] = *src;
+                     src += bytesPerPixel;
+@@ -1846,18 +1976,17 @@ void CKStateChunk::WriteReaderBitmap(const VxImageDescEx &desc, CKBitmapReader *
+                 CKBYTE *dst = alphaPlane + static_cast<size_t>(y) * desc.Width;
+                 CKBYTE *src = srcRow;
+                 for (int x = 0; x < desc.Width; ++x) {
+-                    CKDWORD packedPixel = 0;
+-                    memcpy(&packedPixel, src, bytesPerPixel);
++                    CKDWORD packedPixel = ReadPackedPixel(src, bytesPerPixel);
+                     dst[x] = static_cast<CKBYTE>(((packedPixel & alphaMask) >> g_AlphaShift_LSB) << g_AlphaQuantShift_MSB);
+                     src += bytesPerPixel;
+                 }
+                 srcRow -= desc.BytesPerLine;
+             }
+         }
+-        WriteBuffer_LEndian(static_cast<int>(planeSize), alphaPlane);
++        WriteBuffer(static_cast<int>(planeSize), alphaPlane);
+         delete[] alphaPlane;
+     } else {
+-        WriteBuffer_LEndian(0, nullptr);
++        WriteBuffer(0, nullptr);
+     }
+ 
+     reader->ReleaseMemory(savedBuffer);
+@@ -1870,7 +1999,7 @@ CKBOOL CKStateChunk::ReadReaderBitmap(const VxImageDescEx &desc) {
+ 
+     CKFileExtension ext;
+     memset(ext.m_Data, 0, sizeof(ext.m_Data));
+-    ReadAndFillBuffer_LEndian(sizeof(CKFileExtension), ext.m_Data);
++    ReadAndFillBuffer(sizeof(CKFileExtension), ext.m_Data);
+     CKGUID readerGuid = ReadGuid();
+ 
+     CKBitmapReader *reader = CKGetPluginManager()->GetBitmapReader(ext, &readerGuid);
+@@ -1955,10 +2084,10 @@ void CKStateChunk::WriteRawBitmap(const VxImageDescEx &desc) {
+         delete[] greenPlane;
+         delete[] redPlane;
+         delete[] alphaPlane;
+-        WriteBuffer_LEndian(0, nullptr);
+-        WriteBuffer_LEndian(0, nullptr);
+-        WriteBuffer_LEndian(0, nullptr);
+-        WriteBuffer_LEndian(0, nullptr);
++        WriteBuffer(0, nullptr);
++        WriteBuffer(0, nullptr);
++        WriteBuffer(0, nullptr);
++        WriteBuffer(0, nullptr);
+         return;
+     }
+ 
+@@ -1974,10 +2103,10 @@ void CKStateChunk::WriteRawBitmap(const VxImageDescEx &desc) {
+             for (int remaining = height; remaining > 0; --remaining) {
+                 const CKBYTE *pixel = scanline;
+                 for (int x = 0; x < width; ++x) {
+-                    *blueOut++ = pixel[0];
+-                    *greenOut++ = pixel[1];
+-                    *redOut++ = pixel[2];
+-                    *alphaOut++ = pixel[3];
++                    *blueOut++ = pixel[kPixelBlueByte];
++                    *greenOut++ = pixel[kPixelGreenByte];
++                    *redOut++ = pixel[kPixelRedByte];
++                    *alphaOut++ = pixel[kPixelAlphaByte];
+                     pixel += bytesPerPixel;
+                 }
+                 scanline -= desc.BytesPerLine;
+@@ -1986,9 +2115,9 @@ void CKStateChunk::WriteRawBitmap(const VxImageDescEx &desc) {
+             for (int remaining = height; remaining > 0; --remaining) {
+                 const CKBYTE *pixel = scanline;
+                 for (int x = 0; x < width; ++x) {
+-                    *blueOut++ = pixel[0];
+-                    *greenOut++ = pixel[1];
+-                    *redOut++ = pixel[2];
++                    *blueOut++ = pixel[kPixelBlueByte];
++                    *greenOut++ = pixel[kPixelGreenByte];
++                    *redOut++ = pixel[kPixelRedByte];
+                     pixel += bytesPerPixel;
+                 }
+                 scanline -= desc.BytesPerLine;
+@@ -2008,8 +2137,7 @@ void CKStateChunk::WriteRawBitmap(const VxImageDescEx &desc) {
+         for (int remaining = height; remaining > 0; --remaining) {
+             const CKBYTE *pixel = scanline;
+             for (int x = 0; x < width; ++x) {
+-                CKDWORD sample = 0;
+-                memcpy(&sample, pixel, bytesPerPixel);
++                CKDWORD sample = ReadPackedPixel(pixel, bytesPerPixel);
+                 *blueOut++ = static_cast<CKBYTE>(((sample & desc.BlueMask) >> blueLsb) << blueQuant);
+                 *greenOut++ = static_cast<CKBYTE>(((sample & desc.GreenMask) >> greenLsb) << greenQuant);
+                 *redOut++ = static_cast<CKBYTE>(((sample & desc.RedMask) >> redLsb) << redQuant);
+@@ -2064,19 +2192,19 @@ void CKStateChunk::WriteRawBitmap(const VxImageDescEx &desc) {
+ 
+     if (compressionUsed) {
+         m_Data[compressionFlagPos] = 1;
+-        WriteBuffer_LEndian(encodedBlueSize, encodedBlue);
+-        WriteBuffer_LEndian(encodedGreenSize, encodedGreen);
+-        WriteBuffer_LEndian(encodedRedSize, encodedRed);
++        WriteBuffer(encodedBlueSize, encodedBlue);
++        WriteBuffer(encodedGreenSize, encodedGreen);
++        WriteBuffer(encodedRedSize, encodedRed);
+     } else {
+-        WriteBuffer_LEndian(static_cast<int>(planeSize), bluePlane);
+-        WriteBuffer_LEndian(static_cast<int>(planeSize), greenPlane);
+-        WriteBuffer_LEndian(static_cast<int>(planeSize), redPlane);
++        WriteBuffer(static_cast<int>(planeSize), bluePlane);
++        WriteBuffer(static_cast<int>(planeSize), greenPlane);
++        WriteBuffer(static_cast<int>(planeSize), redPlane);
+     }
+ 
+     if (alphaPlane) {
+-        WriteBuffer_LEndian(static_cast<int>(planeSize), alphaPlane);
++        WriteBuffer(static_cast<int>(planeSize), alphaPlane);
+     } else {
+-        WriteBuffer_LEndian(0, nullptr);
++        WriteBuffer(0, nullptr);
+     }
+ 
+     delete[] encodedBlue;
+@@ -2195,19 +2323,21 @@ CKBYTE *CKStateChunk::ReadRawBitmap(VxImageDescEx &desc) {
+         if (alpha) {
+             for (int y = 0; y < rows; ++y) {
+                 for (int x = 0; x < columns; ++x) {
+-                    *dst++ = *blue++;
+-                    *dst++ = *green++;
+-                    *dst++ = *red++;
+-                    *dst++ = *alpha++;
++                    dst[kPixelBlueByte] = *blue++;
++                    dst[kPixelGreenByte] = *green++;
++                    dst[kPixelRedByte] = *red++;
++                    dst[kPixelAlphaByte] = *alpha++;
++                    dst += 4;
+                 }
+             }
+         } else {
+             for (int y = 0; y < rows; ++y) {
+                 for (int x = 0; x < columns; ++x) {
+-                    *dst++ = *blue++;
+-                    *dst++ = *green++;
+-                    *dst++ = *red++;
+-                    *dst++ = 0xFF;
++                    dst[kPixelBlueByte] = *blue++;
++                    dst[kPixelGreenByte] = *green++;
++                    dst[kPixelRedByte] = *red++;
++                    dst[kPixelAlphaByte] = 0xFF;
++                    dst += 4;
+                 }
+             }
+         }
+@@ -2476,7 +2606,7 @@ void CKStateChunk::Pack(int CompressionLevel) {
+         if (data) {
+             memcpy(data, buf, destSize);
+             delete[] m_Data;
+-            m_Data = (int *) data;
++            m_Data = (CKChunkWord *) data;
+             // IDA stores raw byte size, not DWORD count
+             m_ChunkSize = destSize;
+         }
+@@ -2503,7 +2633,7 @@ CKBOOL CKStateChunk::UnPack(int DestSize) {
+ 
+     // Store as DWORD count after decompression
+     const int newChunkSize = DestSize >> 2;
+-    int *data = new int[newChunkSize];
++    CKChunkWord *data = new CKChunkWord[newChunkSize];
+     if (!data) {
+         delete[] buf;
+         return FALSE;
+@@ -2544,9 +2674,10 @@ void CKStateChunk::AttributePatch(CKBOOL preserveData, int *ConversionTable, int
+     if (ConversionTable && NbEntries > 0 && sequenceCount > 0) {
+         int remaining = sequenceCount;
+         while (remaining-- > 0) {
+-            int *value = &m_Data[m_ChunkParser->CurrentPos];
+-            if (*value >= 0 && *value < NbEntries)
+-                *value = ConversionTable[*value];
++            CKChunkWord &value = m_Data[m_ChunkParser->CurrentPos];
++            const int current = value;
++            if (current >= 0 && current < NbEntries)
++                value = ConversionTable[current];
+             m_ChunkParser->CurrentPos++;
+         }
+     }
+@@ -2569,9 +2700,9 @@ int CKStateChunk::IterateAndDo(ChunkIterateFct fct, ChunkIteratorData *it) {
          ChunkIteratorData child;
          child.CopyFctData(it);
  
 -        const int entry = it->Chunks[chunkIndex];
-+        int entry = it->Chunks[chunkIndex];
-+#ifdef WII
-+        entry = __builtin_bswap32(entry);
-+#endif
++        const int entry = IteratorListEntry(it, it->Chunks, chunkIndex);
          if (entry >= 0) {
-             int *data = it->Data;
--            const int blockSize = data[entry];
--            if (blockSize > 0 && data[entry + 2] + 4 != blockSize) {
--                child.ChunkVersion = static_cast<short>(data[entry + 2] >> 16);
-+            int blockSize = data[entry];
-+#ifdef WII
-+            blockSize = __builtin_bswap32(blockSize);
-+#endif
-+            int entry2 = data[entry + 2];
-+#ifdef WII
-+            entry2 = __builtin_bswap32(entry2);
-+#endif
-+            if (blockSize > 0 && entry2 + 4 != blockSize) {
-+                child.ChunkVersion = static_cast<short>(entry2 >> 16);
-                 child.ChunkSize = data[entry + 3];
-+#ifdef WII
-+                child.ChunkSize = __builtin_bswap32(child.ChunkSize);
-+#endif
-                 child.IdCount = data[entry + 5];
-+#ifdef WII
-+                child.IdCount = __builtin_bswap32(child.IdCount);
-+#endif
-                 child.ChunkCount = data[entry + 6];
-+#ifdef WII
-+                child.ChunkCount = __builtin_bswap32(child.ChunkCount);
-+#endif
+-            int *data = it->Data;
++            CKChunkWord *data = it->Data;
+             const int blockSize = data[entry];
+             if (blockSize > 0 && data[entry + 2] + 4 != blockSize) {
+                 child.ChunkVersion = static_cast<short>(data[entry + 2] >> 16);
+@@ -2589,7 +2720,7 @@ int CKStateChunk::IterateAndDo(ChunkIterateFct fct, ChunkIteratorData *it) {
+                 child.ManagerCount = managerCount;
  
-                 int payloadOffset = entry + 7;
-                 int managerCount = data[payloadOffset];
-+#ifdef WII
-+                managerCount = __builtin_bswap32(managerCount);
-+#endif
-                 if (parentUsesLegacyLayout) {
-                     managerCount = 0;
-                 } else {
-@@ -2707,9 +3006,17 @@
-             int dataOffset = it->Ids[idx];
+                 child.Data = &data[payloadOffset];
+-                int *cursor = child.Data + child.ChunkSize;
++                int *cursor = reinterpret_cast<int *>(child.Data + child.ChunkSize);
+ 
+                 child.Ids = (child.IdCount > 0) ? cursor : nullptr;
+                 cursor += child.IdCount;
+@@ -2612,13 +2743,13 @@ int CKStateChunk::IterateAndDo(ChunkIterateFct fct, ChunkIteratorData *it) {
+         if (chunkIndex >= it->ChunkCount)
+             break;
+ 
+-        const int sequenceOffset = it->Chunks[chunkIndex];
++        const int sequenceOffset = IteratorListEntry(it, it->Chunks, chunkIndex);
+         if (sequenceOffset < 0 || sequenceOffset >= it->ChunkSize) {
+             ++chunkIndex;
+             continue;
+         }
+ 
+-        int *data = it->Data;
++        CKChunkWord *data = it->Data;
+         int packedCount = data[sequenceOffset];
+         int cursor = sequenceOffset + 1;
+ 
+@@ -2654,7 +2785,7 @@ int CKStateChunk::IterateAndDo(ChunkIterateFct fct, ChunkIteratorData *it) {
+             child.ManagerCount = managerCount;
+ 
+             child.Data = &data[payloadOffset];
+-            int *packedCursor = child.Data + child.ChunkSize;
++            int *packedCursor = reinterpret_cast<int *>(child.Data + child.ChunkSize);
+ 
+             child.Ids = (child.IdCount > 0) ? packedCursor : nullptr;
+             packedCursor += child.IdCount;
+@@ -2704,12 +2835,14 @@ int CKStateChunk::ObjectRemapper(ChunkIteratorData *it) {
+             return 0;
+ 
+         for (int idx = 0; idx < it->IdCount;) {
+-            int dataOffset = it->Ids[idx];
++            int dataOffset = IteratorListEntry(it, it->Ids, idx);
              if (dataOffset >= 0) {
                  if (dataOffset >= 0 && dataOffset < it->ChunkSize) {
-+#ifdef WII
-+                    CK_ID value = (CK_ID)__builtin_bswap32((uint32_t)it->Data[dataOffset]);
+-                    CK_ID &value = reinterpret_cast<CK_ID &>(it->Data[dataOffset]);
+-                    if (RemapObjectId(it, value))
++                    CK_ID value = it->Data[dataOffset];
 +                    if (RemapObjectId(it, value)) {
-+                        it->Data[dataOffset] = (int)__builtin_bswap32((uint32_t)value);
-+                        ++remappedCount;
-+                    }
-+#else
-                     CK_ID &value = reinterpret_cast<CK_ID &>(it->Data[dataOffset]);
-                     if (RemapObjectId(it, value))
++                        it->Data[dataOffset] = value;
                          ++remappedCount;
-+#endif
++                    }
                  }
                  ++idx;
                  continue;
-@@ -2725,14 +3032,25 @@
-                 continue;
-             }
+@@ -2719,7 +2852,7 @@ int CKStateChunk::ObjectRemapper(ChunkIteratorData *it) {
+             if (idx >= it->IdCount)
+                 break;
  
--            const int count = it->Data[sequenceOffset];
-+            int count = it->Data[sequenceOffset];
-+#ifdef WII
-+            count = __builtin_bswap32(count);
-+#endif
-             const int firstEntry = sequenceOffset + 1;
+-            const int sequenceOffset = it->Ids[idx];
++            const int sequenceOffset = IteratorListEntry(it, it->Ids, idx);
+             if (sequenceOffset < 0 || sequenceOffset >= it->ChunkSize) {
+                 ++idx;
+                 continue;
+@@ -2730,9 +2863,11 @@ int CKStateChunk::ObjectRemapper(ChunkIteratorData *it) {
              const int lastEntry = firstEntry + count;
              if (count > 0 && lastEntry <= it->ChunkSize) {
                  for (int cursor = firstEntry; cursor < lastEntry; ++cursor) {
-+#ifdef WII
-+                    CK_ID value = (CK_ID)__builtin_bswap32((uint32_t)it->Data[cursor]);
+-                    CK_ID &value = reinterpret_cast<CK_ID &>(it->Data[cursor]);
+-                    if (RemapObjectId(it, value))
++                    CK_ID value = it->Data[cursor];
 +                    if (RemapObjectId(it, value)) {
-+                        it->Data[cursor] = (int)__builtin_bswap32((uint32_t)value);
-+                        ++remappedCount;
-+                    }
-+#else
-                     CK_ID &value = reinterpret_cast<CK_ID &>(it->Data[cursor]);
-                     if (RemapObjectId(it, value))
++                        it->Data[cursor] = value;
                          ++remappedCount;
-+#endif
++                    }
                  }
              }
  
-@@ -2741,16 +3059,29 @@
-         return remappedCount;
-     }
- 
-+#ifdef WII
-+    static constexpr CKDWORD OBJID_MARKER[3] = {0xC9C42BE3, 0xE3124213, 0xDCE9BAFC};
-+    static constexpr CKDWORD SEQ_MARKER[5] = {0x47BD92E1, 0x28662413, 0xCEB3EA13, 0xFCAE9178, 0x62459813};
-+#else
-     static constexpr CKDWORD OBJID_MARKER[3] = {0xE32BC4C9, 0x134212E3, 0xFCBAE9DC};
-     static constexpr CKDWORD SEQ_MARKER[5] = {0xE192BD47, 0x13246628, 0x13EAB3CE, 0x7891AEFC, 0x13984562};
-+#endif
- 
-     for (int pos = 3; pos < it->ChunkSize; ++pos) {
+@@ -2748,9 +2883,11 @@ int CKStateChunk::ObjectRemapper(ChunkIteratorData *it) {
          if (it->Data[pos - 3] == OBJID_MARKER[0] &&
              it->Data[pos - 2] == OBJID_MARKER[1] &&
              it->Data[pos - 1] == OBJID_MARKER[2]) {
-+#ifdef WII
-+            CK_ID value = (CK_ID)__builtin_bswap32((uint32_t)it->Data[pos]);
+-            CK_ID &value = reinterpret_cast<CK_ID &>(it->Data[pos]);
+-            if (RemapObjectId(it, value))
++            CK_ID value = it->Data[pos];
 +            if (RemapObjectId(it, value)) {
-+                it->Data[pos] = (int)__builtin_bswap32((uint32_t)value);
-+                ++remappedCount;
-+            }
-+#else
-             CK_ID &value = reinterpret_cast<CK_ID &>(it->Data[pos]);
-             if (RemapObjectId(it, value))
++                it->Data[pos] = value;
                  ++remappedCount;
-+#endif
++            }
          }
      }
  
-@@ -2761,15 +3092,26 @@
-                 it->Data[pos] == SEQ_MARKER[2] &&
-                 it->Data[pos + 1] == SEQ_MARKER[3] &&
-                 it->Data[pos + 2] == SEQ_MARKER[4]) {
--                const int count = it->Data[pos + 3];
-+                int count = it->Data[pos + 3];
-+#ifdef WII
-+                count = __builtin_bswap32(count);
-+#endif
-                 if (count > 0) {
-                     const int firstEntry = pos + 4;
+@@ -2767,9 +2904,11 @@ int CKStateChunk::ObjectRemapper(ChunkIteratorData *it) {
                      const int lastEntry = firstEntry + count;
                      if (lastEntry <= it->ChunkSize) {
                          for (int cursor = firstEntry; cursor < lastEntry; ++cursor) {
-+#ifdef WII
-+                            CK_ID value = (CK_ID)__builtin_bswap32((uint32_t)it->Data[cursor]);
+-                            CK_ID &value = reinterpret_cast<CK_ID &>(it->Data[cursor]);
+-                            if (RemapObjectId(it, value))
++                            CK_ID value = it->Data[cursor];
 +                            if (RemapObjectId(it, value)) {
-+                                it->Data[cursor] = (int)__builtin_bswap32((uint32_t)value);
-+                                ++remappedCount;
-+                            }
-+#else
-                             CK_ID &value = reinterpret_cast<CK_ID &>(it->Data[cursor]);
-                             if (RemapObjectId(it, value))
++                                it->Data[cursor] = value;
                                  ++remappedCount;
-+#endif
++                            }
                          }
                      }
                  }
-@@ -2789,8 +3131,22 @@
-         int offset = it->Managers[idx];
+@@ -2786,12 +2925,12 @@ int CKStateChunk::ManagerRemapper(ChunkIteratorData *it) {
+ 
+     int total = 0;
+     for (int idx = 0; idx < it->ManagerCount;) {
+-        int offset = it->Managers[idx];
++        int offset = IteratorListEntry(it, it->Managers, idx);
          if (offset >= 0) {
              if (offset + 2 < it->ChunkSize) {
-+#ifdef WII
-+                CKGUID guid(__builtin_bswap32(it->Data[offset]), __builtin_bswap32(it->Data[offset + 1]));
-+#else
                  CKGUID guid(it->Data[offset], it->Data[offset + 1]);
-+#endif
                  if (guid == it->Guid) {
-+#ifdef WII
-+                    int value = __builtin_bswap32(it->Data[offset + 2]);
-+                    if (value >= 0 && value < it->NbEntries) {
-+                        int mapped = it->ConversionTable[value];
-+                        if (mapped != value) {
-+                            it->Data[offset + 2] = __builtin_bswap32(mapped);
-+                            ++total;
-+                        }
-+                    }
-+#else
-                     int &value = it->Data[offset + 2];
+-                    int &value = it->Data[offset + 2];
++                    CKChunkWord &value = it->Data[offset + 2];
                      if (value >= 0 && value < it->NbEntries) {
                          int mapped = it->ConversionTable[value];
-@@ -2799,6 +3155,7 @@
-                             ++total;
-                         }
-                     }
-+#endif
-                 }
-             }
-             ++idx;
-@@ -2815,18 +3172,35 @@
-             continue;
-         }
+                         if (mapped != value) {
+@@ -2809,7 +2948,7 @@ int CKStateChunk::ManagerRemapper(ChunkIteratorData *it) {
+         if (idx >= it->ManagerCount)
+             break;
  
--        const int count = it->Data[sequenceOffset];
-+        int count = it->Data[sequenceOffset];
-+#ifdef WII
-+        count = __builtin_bswap32(count);
-+#endif
-         if (count <= 0) {
+-        const int sequenceOffset = it->Managers[idx];
++        const int sequenceOffset = IteratorListEntry(it, it->Managers, idx);
+         if (sequenceOffset < 0 || sequenceOffset + 2 >= it->ChunkSize) {
              ++idx;
              continue;
-         }
- 
-+#ifdef WII
-+        CKGUID guid(__builtin_bswap32(it->Data[sequenceOffset + 1]), __builtin_bswap32(it->Data[sequenceOffset + 2]));
-+#else
-         CKGUID guid(it->Data[sequenceOffset + 1], it->Data[sequenceOffset + 2]);
-+#endif
-         if (guid == it->Guid) {
-             const int firstValue = sequenceOffset + 3;
+@@ -2827,7 +2966,7 @@ int CKStateChunk::ManagerRemapper(ChunkIteratorData *it) {
              const int endValue = firstValue + count;
              if (endValue <= it->ChunkSize) {
                  for (int cursor = firstValue; cursor < endValue; ++cursor) {
-+#ifdef WII
-+                    int value = __builtin_bswap32(it->Data[cursor]);
-+                    if (value >= 0 && value < it->NbEntries) {
-+                        int mapped = it->ConversionTable[value];
-+                        if (mapped != value) {
-+                            it->Data[cursor] = __builtin_bswap32(mapped);
-+                            ++total;
-+                        }
-+                    }
-+#else
-                     int &value = it->Data[cursor];
+-                    int &value = it->Data[cursor];
++                    CKChunkWord &value = it->Data[cursor];
                      if (value >= 0 && value < it->NbEntries) {
                          int mapped = it->ConversionTable[value];
-@@ -2835,6 +3209,7 @@
-                             ++total;
-                         }
-                     }
-+#endif
-                 }
-             }
-         }
-@@ -2851,23 +3226,44 @@
- 
-     int currentPos = 0;
-     while (currentPos + 1 < it->ChunkSize) {
--        if (it->Data[currentPos] == 0x40) {
-+        int curData = it->Data[currentPos];
-+#ifdef WII
-+        curData = __builtin_bswap32(curData);
-+#endif
-+        if (curData == 0x40) {
-             const int headerStart = currentPos + 2;
-             if (headerStart + 4 < it->ChunkSize) {
-+#ifdef WII
-+                CKGUID storedGuid(__builtin_bswap32(it->Data[headerStart]), __builtin_bswap32(it->Data[headerStart + 1]));
-+                int d2 = __builtin_bswap32(it->Data[headerStart + 2]);
-+#else
+                         if (mapped != value) {
+@@ -2857,9 +2996,10 @@ int CKStateChunk::ParameterRemapper(ChunkIteratorData *it) {
                  CKGUID storedGuid(it->Data[headerStart], it->Data[headerStart + 1]);
--                if (storedGuid == it->Guid && it->Data[headerStart + 2] == 1) {
-+                int d2 = it->Data[headerStart + 2];
-+#endif
-+                if (storedGuid == it->Guid && d2 == 1) {
+                 if (storedGuid == it->Guid && it->Data[headerStart + 2] == 1) {
                      // GUID, storage kind and buffer byte count precede the value.
-+#ifdef WII
-+                    int value = __builtin_bswap32(it->Data[headerStart + 4]);
-+                    if (value >= 0 && value < it->NbEntries)
-+                        it->Data[headerStart + 4] = __builtin_bswap32(it->ConversionTable[value]);
-+                    else
-+                        it->Data[headerStart + 4] = 0;
-+#else
-                     int &value = it->Data[headerStart + 4];
-                     if (value >= 0 && value < it->NbEntries)
-                         value = it->ConversionTable[value];
+-                    int &value = it->Data[headerStart + 4];
+-                    if (value >= 0 && value < it->NbEntries)
+-                        value = it->ConversionTable[value];
++                    CKChunkWord &value = it->Data[headerStart + 4];
++                    const int current = value;
++                    if (current >= 0 && current < it->NbEntries)
++                        value = it->ConversionTable[current];
                      else
                          value = 0;
-+#endif
                      return 1;
-                 }
-             }
-         }
+diff --git a/src/CKWaveSound.cpp b/src/CKWaveSound.cpp
+index 346da1f..055466e 100644
+--- a/src/CKWaveSound.cpp
++++ b/src/CKWaveSound.cpp
+@@ -1151,8 +1151,8 @@ CKStateChunk *CKWaveSound::Save(CKFile *file, CKDWORD flags) {
+         CKObject *attachedObj = m_Context->GetObject(m_AttachedObject);
+         chunk->WriteObject(attachedObj);
  
--        const int nextPos = it->Data[currentPos + 1];
-+        int nextPos = it->Data[currentPos + 1];
-+#ifdef WII
-+        nextPos = __builtin_bswap32(nextPos);
-+#endif
-         if (nextPos == 0 || nextPos <= currentPos || nextPos >= it->ChunkSize)
-             break;
-         currentPos = nextPos;
+-        chunk->WriteBuffer(sizeof(VxVector), &m_Position);
+-        chunk->WriteBuffer(sizeof(VxVector), &m_Direction);
++        chunk->WriteBuffer_LEndian(sizeof(VxVector), &m_Position);
++        chunk->WriteBuffer_LEndian(sizeof(VxVector), &m_Direction);
+ 
+         chunk->WriteDword(0); // Reserved
+     }
+@@ -1224,8 +1224,8 @@ CKERROR CKWaveSound::Load(CKStateChunk *chunk, CKFile *file) {
+         SetMinMaxDistance(minDist, maxDist, distBehavior);
+ 
+         m_AttachedObject = chunk->ReadObjectID();
+-        chunk->ReadAndFillBuffer(sizeof(VxVector), &m_Position);
+-        chunk->ReadAndFillBuffer(sizeof(VxVector), &m_Direction);
++        chunk->ReadAndFillBuffer_LEndian(sizeof(VxVector), &m_Position);
++        chunk->ReadAndFillBuffer_LEndian(sizeof(VxVector), &m_Direction);
+         chunk->ReadDword(); // Reserved
+     } else if (dataVersion >= 2) {
+         m_State = chunk->ReadDword();
+@@ -1256,8 +1256,8 @@ CKERROR CKWaveSound::Load(CKStateChunk *chunk, CKFile *file) {
+             SetMinMaxDistance(minDist, maxDist, distBehavior);
+ 
+             m_AttachedObject = chunk->ReadObjectID();
+-            chunk->ReadAndFillBuffer(sizeof(VxVector), &m_Position);
+-            chunk->ReadAndFillBuffer(sizeof(VxVector), &m_Direction);
++            chunk->ReadAndFillBuffer_LEndian(sizeof(VxVector), &m_Position);
++            chunk->ReadAndFillBuffer_LEndian(sizeof(VxVector), &m_Direction);
+             chunk->ReadInt(); // Reserved
+         }
+     } else {

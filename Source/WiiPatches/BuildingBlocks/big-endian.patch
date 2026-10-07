@@ -1,0 +1,164 @@
+diff --git a/Interface/CKFontManager.cpp b/Interface/CKFontManager.cpp
+index f8637f1..fc77a48 100644
+--- a/Interface/CKFontManager.cpp
++++ b/Interface/CKFontManager.cpp
+@@ -1017,9 +1017,9 @@ CKStateChunk *CKFontManager::SaveData(CKFile *SavedFile)
+ 		// FontName
+ 		chunk->WriteString(font->m_FontName);
+ 		// CharNumber
+-		chunk->WriteBuffer(sizeof(Vx2DVector), &(font->m_CharNumber));
++		chunk->WriteBuffer_LEndian(sizeof(Vx2DVector), &(font->m_CharNumber));
+ 		// FontZone
+-		chunk->WriteBuffer(sizeof(VxRect), &(font->m_FontZone));
++		chunk->WriteBuffer_LEndian(sizeof(VxRect), &(font->m_FontZone));
+ 		// Texture ID
+ 		chunk->WriteObjectID(font->m_FontTexture);
+ 		// Spacing Properties
+diff --git a/TT_DatabaseManager_RT/DatabaseManager.cpp b/TT_DatabaseManager_RT/DatabaseManager.cpp
+index 0947ac6..23bc21c 100644
+--- a/TT_DatabaseManager_RT/DatabaseManager.cpp
++++ b/TT_DatabaseManager_RT/DatabaseManager.cpp
+@@ -29,12 +29,32 @@ static inline unsigned char rotr8(unsigned char val, int shift)
+     return (val >> shift) | (val << (8 - shift));
+ }
+ 
++// Database files store ints and floats in little-endian order on every host,
++// at offsets that need not be aligned.
++static void SwapLittleEndian32(void *value)
++{
++    CKConvertEndianArray32(value, 1);
++}
++
++static void StoreInt32At(char *buffer, int offset, int value)
++{
++    SwapLittleEndian32(&value);
++    memcpy(buffer + offset, &value, sizeof(int));
++}
++
++static void StoreFloatAt(char *buffer, int offset, float value)
++{
++    SwapLittleEndian32(&value);
++    memcpy(buffer + offset, &value, sizeof(float));
++}
++
+ static bool ReadInt32At(const char *buffer, int bufferSize, int offset, int *outValue)
+ {
+     if (!buffer || !outValue || offset < 0 || offset > bufferSize - (int)sizeof(int))
+         return false;
+ 
+     memcpy(outValue, buffer + offset, sizeof(int));
++    SwapLittleEndian32(outValue);
+     return true;
+ }
+ 
+@@ -44,6 +64,7 @@ static bool ReadFloatAt(const char *buffer, int bufferSize, int offset, float *o
+         return false;
+ 
+     memcpy(outValue, buffer + offset, sizeof(float));
++    SwapLittleEndian32(outValue);
+     return true;
+ }
+ 
+@@ -169,6 +190,21 @@ int DatabaseManager::Load(CKContext *context, bool autoRegister, CKSTRING arrayN
+     }
+ 
+     FILE *fp = fopen(m_Filename, "rb");
++#ifndef _WIN32
++    if (!fp)
++    {
++        // Compositions name the database relative to the desktop player's
++        // folder ("..\\Database.tdb"); the game root is the current
++        // directory here. Keep the name that opened for later saves.
++        const char *name = strrchr(m_Filename, '/');
++        if (name && *(name + 1))
++        {
++            fp = fopen(name + 1, "rb");
++            if (fp)
++                memmove(m_Filename, name + 1, strlen(name + 1) + 1);
++        }
++    }
++#endif
+     if (!fp)
+     {
+         context->OutputToConsoleExBeep("TT_LoadDatabase: Error when opening file '%s' (errno=%d)", m_Filename, errno);
+@@ -292,6 +328,7 @@ int DatabaseManager::Load(CKContext *context, bool autoRegister, CKSTRING arrayN
+     char *arrayData = &chunk[nameSize + sizeof(int)];
+     ArrayHeader header;
+     memcpy(&header, arrayData, sizeof(ArrayHeader));
++    CKConvertEndianArray32(&header, sizeof(ArrayHeader) / sizeof(int));
+     if (header.columnCount < 0 ||
+         header.rowCount < 0 ||
+         header.keyColumn < -1 ||
+@@ -317,7 +354,9 @@ int DatabaseManager::Load(CKContext *context, bool autoRegister, CKSTRING arrayN
+         }
+ 
+         CKSTRING colName = (CKSTRING)&arrayData[offset];
+-        CK_ARRAYTYPE type = *(CK_ARRAYTYPE *)&arrayData[offset + colNameSize];
++        int typeValue = 0;
++        ReadInt32At(arrayData, arraySize, offset + colNameSize, &typeValue);
++        CK_ARRAYTYPE type = (CK_ARRAYTYPE)typeValue;
+         switch (type)
+         {
+         case CKARRAYTYPE_INT:
+@@ -484,16 +523,16 @@ int DatabaseManager::Save(CKContext *context)
+         }
+         offset += nameLength + 1;
+ 
+-        *(int *)&chunk[offset] = chunkSize - (nameLength + 1 + sizeof(int));
++        StoreInt32At(chunk, offset, chunkSize - (nameLength + 1 + sizeof(int)));
+         offset += sizeof(int);
+ 
+-        *(int *)&chunk[offset] = columnCount;
++        StoreInt32At(chunk, offset, columnCount);
+         offset += sizeof(int);
+ 
+-        *(int *)&chunk[offset] = rowCount;
++        StoreInt32At(chunk, offset, rowCount);
+         offset += sizeof(int);
+ 
+-        *(int *)&chunk[offset] = array->GetKeyColumn();
++        StoreInt32At(chunk, offset, array->GetKeyColumn());
+         offset += sizeof(int);
+ 
+         for (c = 0; c < columnCount; ++c)
+@@ -511,7 +550,7 @@ int DatabaseManager::Save(CKContext *context)
+             }
+             offset += nameLength + 1;
+ 
+-            *(CK_ARRAYTYPE *)&chunk[offset] = array->GetColumnType(c);
++            StoreInt32At(chunk, offset, array->GetColumnType(c));
+             offset += sizeof(CK_ARRAYTYPE);
+         }
+ 
+@@ -526,7 +565,7 @@ int DatabaseManager::Save(CKContext *context)
+                 {
+                     int value = 0;
+                     array->GetElementValue(i, c, &value);
+-                    *(int *)&chunk[offset] = value;
++                    StoreInt32At(chunk, offset, value);
+                     offset += sizeof(int);
+                 }
+                 break;
+@@ -534,7 +573,7 @@ int DatabaseManager::Save(CKContext *context)
+                 {
+                     float value = 0;
+                     array->GetElementValue(i, c, &value);
+-                    *(float *)&chunk[offset] = value;
++                    StoreFloatAt(chunk, offset, value);
+                     offset += sizeof(float);
+                 }
+                 break;
+@@ -621,6 +660,13 @@ bool DatabaseManager::SetProperty(CKSTRING filename, CKBOOL crypted)
+     int len = (int)strlen(filename) + 1;
+     m_Filename = new char[len];
+     strncpy(m_Filename, filename, len);
++#ifndef _WIN32
++    for (char *c = m_Filename; *c; ++c)
++    {
++        if (*c == '\\')
++            *c = '/';
++    }
++#endif
+ 
+     m_Crypted = crypted;
+     return true;

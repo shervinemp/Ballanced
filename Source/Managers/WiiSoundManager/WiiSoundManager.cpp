@@ -41,13 +41,14 @@ namespace
         return bytes > 0 ? bytes : 1;
     }
 
-    // WAV data is little-endian, and 8-bit WAV samples are unsigned.
+    // Sound readers (dr_wav) decode 16-bit samples to the host byte order, which
+    // is big-endian here; 8-bit WAV samples stay unsigned.
     int VoiceFormat(const CKWaveFormat &format)
     {
         const bool stereo = format.nChannels >= 2;
         if (format.wBitsPerSample == 8)
             return stereo ? VOICE_STEREO_8BIT_U : VOICE_MONO_8BIT_U;
-        return stereo ? VOICE_STEREO_16BIT_LE : VOICE_MONO_16BIT_LE;
+        return stereo ? VOICE_STEREO_16BIT_BE : VOICE_MONO_16BIT_BE;
     }
 
     CKBYTE SilenceByte(const CKWaveFormat &format)

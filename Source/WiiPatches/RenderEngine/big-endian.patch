@@ -1,0 +1,104 @@
+diff --git a/src/CKObjectAnimation.cpp b/src/CKObjectAnimation.cpp
+index aa1dde0..2d65b3f 100644
+--- a/src/CKObjectAnimation.cpp
++++ b/src/CKObjectAnimation.cpp
+@@ -16,6 +16,45 @@
+ #include <climits>
+ #include <cstring>
+ 
++#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
++// Controller keys are dumped into chunks as raw words, which keep the
++// little-endian file layout: convert a dump between that layout and the host.
++// Keys are 32-bit values except the compressed normals of morph keys, which
++// are pairs of 16-bit angles.
++static void ConvertControllerKeys(CKDWORD type, void *keys, int wordCount, bool toHost) {
++    CKDWORD *words = static_cast<CKDWORD *>(keys);
++    if (type != CKANIMATION_MORPH_CONTROL) {
++        CKConvertEndianArray32(words, wordCount);
++        return;
++    }
++    if (wordCount < 3)
++        return;
++    if (toHost)
++        CKConvertEndianArray32(words, 3);
++    const int keyCount = (int) words[0];
++    const int vertexCount = (int) words[1];
++    const bool normals = words[2] != 0;
++    if (!toHost)
++        CKConvertEndianArray32(words, 3);
++    int pos = 3;
++    for (int i = 0; i < keyCount && vertexCount >= 0; ++i) {
++        const int positionWords = 1 + 3 * vertexCount;
++        if (pos + positionWords > wordCount)
++            return;
++        CKConvertEndianArray32(&words[pos], positionWords);
++        pos += positionWords;
++        if (normals) {
++            if (pos + vertexCount > wordCount)
++                return;
++            CKConvertEndianArray16(&words[pos], 2 * vertexCount);
++            pos += vertexCount;
++        }
++    }
++}
++#else
++static void ConvertControllerKeys(CKDWORD, void *, int, bool) {}
++#endif
++
+ namespace {
+ 
+ // Track the active recursion path, rather than all previously visited nodes:
+@@ -243,6 +282,7 @@ CKStateChunk *RCKObjectAnimation::Save(CKFile *file, CKDWORD flags) {
+                     chunk->WriteDword(size);
+                     void *buffer = chunk->LockWriteBuffer(size);
+                     ctrl->DumpKeysTo(buffer);
++                    ConvertControllerKeys(ctrl->m_Type, buffer, size, false);
+                     chunk->Skip(size);
+                 }
+             }
+@@ -256,6 +296,7 @@ CKStateChunk *RCKObjectAnimation::Save(CKFile *file, CKDWORD flags) {
+                     chunk->WriteDword(size);
+                     void *buffer = chunk->LockWriteBuffer(size);
+                     ctrl->DumpKeysTo(buffer);
++                    ConvertControllerKeys(ctrl->m_Type, buffer, size, false);
+                     chunk->Skip(size);
+                 }
+             }
+@@ -269,6 +310,7 @@ CKStateChunk *RCKObjectAnimation::Save(CKFile *file, CKDWORD flags) {
+                     chunk->WriteDword(size);
+                     void *buffer = chunk->LockWriteBuffer(size);
+                     ctrl->DumpKeysTo(buffer);
++                    ConvertControllerKeys(ctrl->m_Type, buffer, size, false);
+                     chunk->Skip(size);
+                 }
+             }
+@@ -282,6 +324,7 @@ CKStateChunk *RCKObjectAnimation::Save(CKFile *file, CKDWORD flags) {
+                     chunk->WriteDword(size);
+                     void *buffer = chunk->LockWriteBuffer(size);
+                     ctrl->DumpKeysTo(buffer);
++                    ConvertControllerKeys(ctrl->m_Type, buffer, size, false);
+                     chunk->Skip(size);
+                 }
+             }
+@@ -302,6 +345,7 @@ CKStateChunk *RCKObjectAnimation::Save(CKFile *file, CKDWORD flags) {
+                     DeleteCKStateChunk(chunk);
+                     return nullptr;
+                 }
++                ConvertControllerKeys(ctrl->m_Type, buffer, size, false);
+                 chunk->Skip(size);
+             }
+         }
+@@ -399,7 +443,12 @@ CKERROR RCKObjectAnimation::Load(CKStateChunk *chunk, CKFile *file) {
+                     return CKERR_INVALIDFILE;
+                 CKAnimController *ctrl = CreateController(ctrlType);
+                 if (ctrl) {
+-                    void *buffer = chunk->LockReadBuffer();
++                    XArray<CKDWORD> keys;
++                    keys.Resize(static_cast<int>(dataSize));
++                    if (dataSize > 0)
++                        memcpy(keys.Begin(), chunk->LockReadBuffer(), dataSize * sizeof(CKDWORD));
++                    ConvertControllerKeys(ctrl->GetType(), keys.Begin(), static_cast<int>(dataSize), true);
++                    void *buffer = keys.Begin();
+                     if (ctrl->GetType() == CKANIMATION_MORPH_CONTROL) {
+                         if (!static_cast<RCKMorphController *>(ctrl)->ReadKeysFromBuffer(buffer, static_cast<int>(dataSize) * 4)) {
+                             DeleteController(ctrlType);
