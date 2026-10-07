@@ -52,6 +52,48 @@ namespace
         return entity;
     }
 
+    // A fixed concave mesh: an n x n grid over [-half, half] in x and z whose
+    // height is height(x). Each triangle becomes its own ledge, as level
+    // floors do.
+    CK3dEntity *CreateConcaveGround(CKContext *context, CKIpionManager *physics, const char *name, int n, float half,
+                                    float (*height)(float), const VxVector &position)
+    {
+        CKMesh *mesh = (CKMesh *)context->CreateObject(CKCID_MESH, (CKSTRING)name);
+        mesh->SetVertexCount((n + 1) * (n + 1));
+        for (int i = 0; i <= n; ++i)
+            for (int j = 0; j <= n; ++j)
+            {
+                const float x = -half + 2.0f * half * i / n;
+                const float z = -half + 2.0f * half * j / n;
+                VxVector vertex(x, height(x), z);
+                mesh->SetVertexPosition(i * (n + 1) + j, &vertex);
+            }
+        mesh->SetFaceCount(2 * n * n);
+        for (int i = 0; i < n; ++i)
+            for (int j = 0; j < n; ++j)
+            {
+                const int a = i * (n + 1) + j, b = a + 1, c = a + n + 1, d = c + 1;
+                mesh->SetFaceVertexIndex(2 * (i * n + j), a, b, d);
+                mesh->SetFaceVertexIndex(2 * (i * n + j) + 1, a, d, c);
+            }
+        CK3dEntity *entity = (CK3dEntity *)context->CreateObject(CKCID_3DENTITY, (CKSTRING)name);
+        entity->SetCurrentMesh(mesh);
+        entity->SetPosition(&position);
+        IVP_Material *material = new IVP_Material_Simple(0.7f, 0.2f);
+        const int err = physics->CreatePhysicsObjectOnParameters(entity, 0, NULL, 0, NULL, NULL, 1, &mesh, 0.0f,
+                                                                (CKSTRING)name, NULL, TRUE, material, 1.0f,
+                                                                (CKSTRING) "", FALSE, TRUE, TRUE, 0.0f, 0.0f);
+        WT_CHECK(err == CK_OK, "%s physicalized (%d)", name, err);
+        if (err == CK_OK)
+            physics->OwnMaterial(entity, material);
+        else
+            delete material;
+        return entity;
+    }
+
+    float Flat(float) { return 0.0f; }
+    float Valley(float x) { return fabsf(x) * 0.4f; }
+
     CK3dEntity *CreateBall(CKContext *context, CKIpionManager *physics, const char *name, float radius,
                            const VxVector &position, CKBOOL fixed = FALSE)
     {
@@ -123,6 +165,19 @@ void RunPhysicsTests(CKContext *context)
     roller->GetPosition(&position);
     WT_CHECK(fabsf(position.x + 2.0f) > 1.0f, "ball rolls down the slope: x = %f", position.x);
     WT_CHECK(fabsf(position.z - 10.0f) < 0.5f, "ball rolls straight: z = %f", position.z);
+
+    // A concave floor of 128 triangles: a ball dropped on it rests on top.
+    CreateConcaveGround(context, physics, "PhysicsConcaveFloor", 8, 6.0f, Flat, VxVector(0.0f, 0.0f, -30.0f));
+    CK3dEntity *concaveBall = CreateBall(context, physics, "PhysicsConcaveBall", 0.5f, VxVector(0.7f, 3.0f, -29.3f));
+    // A V-shaped valley: a ball dropped on one side rolls towards the bottom.
+    CreateConcaveGround(context, physics, "PhysicsValley", 6, 6.0f, Valley, VxVector(0.0f, 0.0f, -50.0f));
+    CK3dEntity *valleyBall = CreateBall(context, physics, "PhysicsValleyBall", 0.5f, VxVector(-4.0f, 3.5f, -50.0f));
+    Simulate(physics, 240);
+    concaveBall->GetPosition(&position);
+    WT_CHECK(fabsf(position.y - 0.5f) < 0.1f, "ball rests on the concave floor: y = %f", position.y);
+    valleyBall->GetPosition(&position);
+    WT_CHECK(position.y > 0.3f && position.y < 2.5f, "ball stays in the valley: y = %f", position.y);
+    WT_CHECK(position.x > -3.0f, "ball rolls into the valley: x = %f", position.x);
 
     context->Reset();
     context->ClearAll();
