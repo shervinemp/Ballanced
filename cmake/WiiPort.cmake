@@ -312,6 +312,13 @@ function(ballance_wii_port_building_blocks)
             FILES Characters/Behaviors/UnlimitedParams.h Characters/Behaviors/UnlimitedController.cpp
             TARGETS CharactersStatic
     )
+    # Blocks that read typed text ask for the on-screen keyboard.
+    ballance_wii_patch(TextInput
+            ROOT "${_root}"
+            PATCH "${BALLANCE_WII_PATCH_DIR}/BuildingBlocks/text-input.patch"
+            FILES TT_Toolbox_RT/Behaviors/InputString.cpp Controllers/Behaviors/EditString.cpp
+            TARGETS TT_Toolbox_RTStatic ControllersStatic
+    )
     # No system fonts: TrueType fonts are looked up in a Fonts folder next to the game.
     ballance_wii_patch(InterfaceFonts
             ROOT "${_root}"

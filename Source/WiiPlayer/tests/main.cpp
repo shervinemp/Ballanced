@@ -81,6 +81,7 @@ int main(int argc, char **argv)
     RunRasterizerTests();
     RunSceneTests(context);
     RunBehaviorTests(context);
+    RunInputTests(context);
     RunPhysicsTests(context);
     if (storage)
         BuildDemoComposition(context);

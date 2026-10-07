@@ -59,6 +59,18 @@ void VxWiiGetDisplaySize(int *width, int *height) {
         *height = g_DisplayHeight;
 }
 
+static volatile XBOOL g_TextInputRequested = FALSE;
+
+void VxWiiRequestTextInput() {
+    g_TextInputRequested = TRUE;
+}
+
+XBOOL VxWiiConsumeTextInputRequest() {
+    const XBOOL requested = g_TextInputRequested;
+    g_TextInputRequested = FALSE;
+    return requested;
+}
+
 static XString VxApplicationDirectory() {
     if (g_ApplicationPath.Length() > 0)
         return g_ApplicationPath;

@@ -1,0 +1,52 @@
+diff --git a/Controllers/Behaviors/EditString.cpp b/Controllers/Behaviors/EditString.cpp
+index fb57074..44ca00a 100644
+--- a/Controllers/Behaviors/EditString.cpp
++++ b/Controllers/Behaviors/EditString.cpp
+@@ -6,6 +6,9 @@
+ /////////////////////////////////////////////////////
+ /////////////////////////////////////////////////////
+ #include "CKAll.h"
++#if defined(GEKKO)
++#include "VxWiiPlatform.h"
++#endif
+ 
+ CKObjectDeclaration *FillBehaviorEditStringDecl();
+ CKERROR CreateEditStringProto(CKBehaviorPrototype **pproto);
+@@ -377,6 +380,11 @@ int EditString(const CKBehaviorContext &behcontext)
+         return CKBR_OK;
+     }
+ 
++#if defined(GEKKO)
++    // Text is being typed: the Wii shows its on-screen keyboard.
++    VxWiiRequestTextInput();
++#endif
++
+     if (beh->IsInputActive(IN_ON))
+     {
+         CKBOOL on = TRUE;
+diff --git a/TT_Toolbox_RT/Behaviors/InputString.cpp b/TT_Toolbox_RT/Behaviors/InputString.cpp
+index 5d9d0c9..afd0175 100644
+--- a/TT_Toolbox_RT/Behaviors/InputString.cpp
++++ b/TT_Toolbox_RT/Behaviors/InputString.cpp
+@@ -7,6 +7,9 @@
+ //////////////////////////////////
+ #include "CKAll.h"
+ #include "ToolboxGuids.h"
++#if defined(GEKKO)
++#include "VxWiiPlatform.h"
++#endif
+ 
+ CKObjectDeclaration *FillBehaviorInputStringDecl();
+ CKERROR CreateInputStringProto(CKBehaviorPrototype **pproto);
+@@ -274,6 +277,11 @@ int InputString(const CKBehaviorContext &behcontext)
+         return CKBR_OK;
+     }
+ 
++#if defined(GEKKO)
++    // Text is being typed: the Wii shows its on-screen keyboard.
++    VxWiiRequestTextInput();
++#endif
++
+     if (beh->IsInputActive(IN_ON))
+     {
+         CKBOOL keybrep = FALSE;

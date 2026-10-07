@@ -3,6 +3,8 @@ set(TARGET_NAME WiiInputManager)
 add_library(${TARGET_NAME} STATIC
         WiiInputManager.cpp
         WiiInputManager.h
+        WiiScreenKeyboard.cpp
+        WiiScreenKeyboard.h
         # Parameter types and operations are shared with the desktop manager.
         ${CMAKE_CURRENT_SOURCE_DIR}/../SdlInputManager/Parameters.cpp
 )

@@ -14,4 +14,11 @@ VX_EXPORT const char *VxWiiGetApplicationPath();
 VX_EXPORT void VxWiiSetDisplaySize(int width, int height);
 VX_EXPORT void VxWiiGetDisplaySize(int *width, int *height);
 
+// Text entry. Blocks that read typed text call VxWiiRequestTextInput every
+// frame they run; the input manager shows the on-screen keyboard while the
+// requests keep coming. VxWiiConsumeTextInputRequest reports whether text was
+// requested since its previous call.
+VX_EXPORT void VxWiiRequestTextInput();
+VX_EXPORT XBOOL VxWiiConsumeTextInputRequest();
+
 #endif // VXWIIPLATFORM_H

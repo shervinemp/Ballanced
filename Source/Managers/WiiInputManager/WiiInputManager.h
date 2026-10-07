@@ -3,6 +3,8 @@
 
 #include "CKAll.h"
 
+#include "WiiScreenKeyboard.h"
+
 #define WII_KEYBOARD_SIZE 256
 #define WII_KEY_BUFFER_SIZE 256
 #define WII_JOYSTICK_COUNT 4
@@ -23,6 +25,11 @@
  *   USB keyboard               keys as on a PC
  *
  * HOME opens the HOME menu (handled by the player).
+ *
+ * While the game reads typed text (a high score name), an on-screen keyboard
+ * replaces the game controls: point and press A, or move with the D-Pad or a
+ * stick and press A (2 sideways, C on a Nunchuk); B (1 sideways, Z) deletes,
+ * + (Start) confirms and - toggles Shift.
  */
 class WiiInputManager : public CKInputManager
 {
@@ -103,6 +110,8 @@ private:
     void PollUsbKeyboard(CKDWORD now);
     void PollControllers(CKBYTE wanted[WII_KEYBOARD_SIZE], CKDWORD now);
     void PollPointer();
+    void UpdateScreenKeyboard(CKDWORD now);
+    void ReleaseTypedKeys(CKDWORD now);
     void PressKey(CKDWORD key, CKDWORD now);
     void ReleaseKey(CKDWORD key, CKDWORD now);
     void PushKeyEvent(CKDWORD key, CKDWORD data, CKDWORD now);
@@ -126,6 +135,12 @@ private:
     CKBYTE m_LastMouseButtons[4];
     CKBOOL m_PointerOnScreen;
     int m_PointerChannel;
+
+    CKBOOL m_TextInput;
+    WiiScreenKeyboard m_ScreenKeyboard;
+    WiiScreenKeyboard::Controls m_KeyboardControls;
+    CKDWORD m_TypedKeys[2]; // Held for one frame
+    int m_TypedCount;
 
     Joystick m_Joysticks[WII_JOYSTICK_COUNT];
     int m_ControllersConnected;

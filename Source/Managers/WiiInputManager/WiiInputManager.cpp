@@ -1,5 +1,6 @@
 #include "WiiInputManager.h"
 
+#include "VxWiiPlatform.h"
 #include "WiiSystem.h"
 
 #include <gccore.h>
@@ -116,6 +117,27 @@ namespace
         if (condition)
             wanted[key] = 1;
     }
+
+    // A held direction for the screen keyboard; the first one found wins.
+    void Move(WiiScreenKeyboard::Controls &controls, int x, int y)
+    {
+        if (controls.MoveX == 0 && controls.MoveY == 0)
+        {
+            controls.MoveX = x;
+            controls.MoveY = y;
+        }
+    }
+
+    void MoveWithStick(WiiScreenKeyboard::Controls &controls, float x, float y)
+    {
+        Move(controls, x > kStickThreshold ? 1 : (x < -kStickThreshold ? -1 : 0),
+             y > kStickThreshold ? -1 : (y < -kStickThreshold ? 1 : 0));
+    }
+
+    int Axis(u32 held, u32 negative, u32 positive)
+    {
+        return (held & negative) ? -1 : ((held & positive) ? 1 : 0);
+    }
 }
 
 WiiInputManager::WiiInputManager(CKContext *context) : CKInputManager(context, (CKSTRING)"Wii Input Manager")
@@ -128,6 +150,9 @@ WiiInputManager::WiiInputManager(CKContext *context) : CKInputManager(context, (
     m_PointerOnScreen = FALSE;
     m_PointerChannel = -1;
     m_ControllersConnected = 0;
+    m_TextInput = FALSE;
+    memset(&m_KeyboardControls, 0, sizeof(m_KeyboardControls));
+    m_TypedCount = 0;
     m_Paused = FALSE;
     m_CursorVisible = TRUE;
     m_Cursor = VXCURSOR_NORMALSELECT;
@@ -178,12 +203,16 @@ CKERROR WiiInputManager::OnCKEnd()
         m_UsbKeyboardReady = FALSE;
     }
     wiisystem::SetPointer(false, 0.0f, 0.0f, 0.0f);
+    WiiScreenKeyboard::Hide();
     return CK_OK;
 }
 
 CKERROR WiiInputManager::OnCKReset()
 {
     m_CursorVisible = TRUE;
+    m_TextInput = FALSE;
+    m_TypedCount = 0;
+    WiiScreenKeyboard::Hide();
     ClearState();
     return CK_OK;
 }
@@ -207,6 +236,15 @@ CKERROR WiiInputManager::PreProcess()
     m_MouseDelta.Set(0.0f, 0.0f, 0.0f);
 
     WPAD_ScanPads();
+
+    // Keys typed on the screen keyboard went down last frame.
+    ReleaseTypedKeys(now);
+    const CKBOOL textInput = VxWiiConsumeTextInputRequest() && !m_Paused;
+    if (textInput && !m_TextInput)
+        m_ScreenKeyboard.Open();
+    else if (!textInput && m_TextInput)
+        WiiScreenKeyboard::Hide();
+    m_TextInput = textInput;
 
     if (m_Paused)
     {
@@ -235,6 +273,8 @@ CKERROR WiiInputManager::PreProcess()
         RepeatKeys(now);
 
     PollPointer();
+    if (m_TextInput)
+        UpdateScreenKeyboard(now);
     return CK_OK;
 }
 
@@ -268,6 +308,37 @@ void WiiInputManager::ReleaseKey(CKDWORD key, CKDWORD now)
     m_KeyboardState[key] |= KS_RELEASED;
     m_KeyboardStamps[key] = now - m_KeyboardStamps[key];
     PushKeyEvent(key, 0x00, now);
+}
+
+void WiiInputManager::UpdateScreenKeyboard(CKDWORD now)
+{
+    m_KeyboardControls.Pointing = m_PointerOnScreen != FALSE;
+    m_KeyboardControls.PointerX = m_MousePosition.x;
+    m_KeyboardControls.PointerY = m_MousePosition.y;
+    const WiiScreenKeyboard::Typed typed = m_ScreenKeyboard.Update(m_KeyboardControls, now);
+    if (typed.ScanCode)
+    {
+        // Typed like a press and release on a keyboard, Shift first for a capital.
+        if (typed.Shifted)
+        {
+            PressKey(DIK_LSHIFT, now);
+            m_TypedKeys[m_TypedCount++] = DIK_LSHIFT;
+        }
+        PressKey(typed.ScanCode, now);
+        m_TypedKeys[m_TypedCount++] = typed.ScanCode;
+    }
+    m_ScreenKeyboard.Show();
+}
+
+void WiiInputManager::ReleaseTypedKeys(CKDWORD now)
+{
+    for (int i = m_TypedCount - 1; i >= 0; --i)
+    {
+        const CKDWORD key = m_TypedKeys[i];
+        if ((m_KeyboardState[key] & KS_PRESSED) && !(m_KeyboardState[key] & KS_RELEASED) && !m_UsbKeys[key])
+            ReleaseKey(key, now);
+    }
+    m_TypedCount = 0;
 }
 
 void WiiInputManager::PushKeyEvent(CKDWORD key, CKDWORD data, CKDWORD now)
@@ -354,6 +425,8 @@ void WiiInputManager::PollControllers(CKBYTE wanted[WII_KEYBOARD_SIZE], CKDWORD 
     int connected = 0;
     bool pointerClick = false;
     m_PointerChannel = -1;
+    WiiScreenKeyboard::Controls &keys = m_KeyboardControls;
+    memset(&keys, 0, sizeof(keys));
 
     const u32 gamecubePads = PAD_ScanPads();
 
@@ -378,7 +451,28 @@ void WiiInputManager::PollControllers(CKBYTE wanted[WII_KEYBOARD_SIZE], CKDWORD 
                 m_PointerChannel = chan;
 
             const int expansion = data ? data->exp.type : WPAD_EXP_NONE;
-            if (expansion == WPAD_EXP_NONE && !pointing)
+            if (m_TextInput)
+            {
+                if (expansion == WPAD_EXP_NONE && !pointing)
+                {
+                    // Sideways: the D-Pad turns with the remote.
+                    Move(keys, Axis(held, WPAD_BUTTON_UP, WPAD_BUTTON_DOWN), Axis(held, WPAD_BUTTON_RIGHT, WPAD_BUTTON_LEFT));
+                    keys.Press |= (down & WPAD_BUTTON_2) != 0;
+                    keys.Delete |= (down & WPAD_BUTTON_1) != 0;
+                }
+                else
+                {
+                    Move(keys, Axis(held, WPAD_BUTTON_LEFT, WPAD_BUTTON_RIGHT), Axis(held, WPAD_BUTTON_UP, WPAD_BUTTON_DOWN));
+                    if (pointing)
+                        keys.PointerPress |= (down & WPAD_BUTTON_A) != 0;
+                    else
+                        keys.Press |= (down & WPAD_BUTTON_A) != 0;
+                    keys.Delete |= (down & WPAD_BUTTON_B) != 0;
+                }
+                keys.Confirm |= (down & WPAD_BUTTON_PLUS) != 0;
+                keys.Shift |= (down & WPAD_BUTTON_MINUS) != 0;
+            }
+            else if (expansion == WPAD_EXP_NONE && !pointing)
             {
                 // Held sideways: the D-Pad turns with the remote.
                 Press(wanted, DIK_UP, held & WPAD_BUTTON_RIGHT);
@@ -411,9 +505,18 @@ void WiiInputManager::PollControllers(CKBYTE wanted[WII_KEYBOARD_SIZE], CKDWORD 
             {
                 float x, y;
                 StickVector(data->exp.nunchuk.js, &x, &y);
-                StickToArrows(x, y, wanted);
-                Press(wanted, DIK_LSHIFT, held & WPAD_NUNCHUK_BUTTON_Z);
-                Press(wanted, DIK_SPACE, held & WPAD_NUNCHUK_BUTTON_C);
+                if (m_TextInput)
+                {
+                    MoveWithStick(keys, x, y);
+                    keys.Press |= (down & WPAD_NUNCHUK_BUTTON_C) != 0;
+                    keys.Delete |= (down & WPAD_NUNCHUK_BUTTON_Z) != 0;
+                }
+                else
+                {
+                    StickToArrows(x, y, wanted);
+                    Press(wanted, DIK_LSHIFT, held & WPAD_NUNCHUK_BUTTON_Z);
+                    Press(wanted, DIK_SPACE, held & WPAD_NUNCHUK_BUTTON_C);
+                }
 
                 joystick.Attached = TRUE;
                 joystick.Position.Set(x, -y, 0.0f);
@@ -423,15 +526,28 @@ void WiiInputManager::PollControllers(CKBYTE wanted[WII_KEYBOARD_SIZE], CKDWORD 
             {
                 float x, y;
                 StickVector(data->exp.classic.ljs, &x, &y);
-                StickToArrows(x, y, wanted);
-                Press(wanted, DIK_UP, held & WPAD_CLASSIC_BUTTON_UP);
-                Press(wanted, DIK_DOWN, held & WPAD_CLASSIC_BUTTON_DOWN);
-                Press(wanted, DIK_LEFT, held & WPAD_CLASSIC_BUTTON_LEFT);
-                Press(wanted, DIK_RIGHT, held & WPAD_CLASSIC_BUTTON_RIGHT);
-                Press(wanted, DIK_RETURN, held & WPAD_CLASSIC_BUTTON_A);
-                Press(wanted, DIK_ESCAPE, held & (WPAD_CLASSIC_BUTTON_B | WPAD_CLASSIC_BUTTON_PLUS | WPAD_CLASSIC_BUTTON_MINUS));
-                Press(wanted, DIK_LSHIFT, held & (WPAD_CLASSIC_BUTTON_Y | WPAD_CLASSIC_BUTTON_ZL | WPAD_CLASSIC_BUTTON_FULL_L));
-                Press(wanted, DIK_SPACE, held & (WPAD_CLASSIC_BUTTON_X | WPAD_CLASSIC_BUTTON_ZR | WPAD_CLASSIC_BUTTON_FULL_R));
+                if (m_TextInput)
+                {
+                    Move(keys, Axis(held, WPAD_CLASSIC_BUTTON_LEFT, WPAD_CLASSIC_BUTTON_RIGHT),
+                         Axis(held, WPAD_CLASSIC_BUTTON_UP, WPAD_CLASSIC_BUTTON_DOWN));
+                    MoveWithStick(keys, x, y);
+                    keys.Press |= (down & WPAD_CLASSIC_BUTTON_A) != 0;
+                    keys.Delete |= (down & WPAD_CLASSIC_BUTTON_B) != 0;
+                    keys.Confirm |= (down & WPAD_CLASSIC_BUTTON_PLUS) != 0;
+                    keys.Shift |= (down & (WPAD_CLASSIC_BUTTON_MINUS | WPAD_CLASSIC_BUTTON_Y)) != 0;
+                }
+                else
+                {
+                    StickToArrows(x, y, wanted);
+                    Press(wanted, DIK_UP, held & WPAD_CLASSIC_BUTTON_UP);
+                    Press(wanted, DIK_DOWN, held & WPAD_CLASSIC_BUTTON_DOWN);
+                    Press(wanted, DIK_LEFT, held & WPAD_CLASSIC_BUTTON_LEFT);
+                    Press(wanted, DIK_RIGHT, held & WPAD_CLASSIC_BUTTON_RIGHT);
+                    Press(wanted, DIK_RETURN, held & WPAD_CLASSIC_BUTTON_A);
+                    Press(wanted, DIK_ESCAPE, held & (WPAD_CLASSIC_BUTTON_B | WPAD_CLASSIC_BUTTON_PLUS | WPAD_CLASSIC_BUTTON_MINUS));
+                    Press(wanted, DIK_LSHIFT, held & (WPAD_CLASSIC_BUTTON_Y | WPAD_CLASSIC_BUTTON_ZL | WPAD_CLASSIC_BUTTON_FULL_L));
+                    Press(wanted, DIK_SPACE, held & (WPAD_CLASSIC_BUTTON_X | WPAD_CLASSIC_BUTTON_ZR | WPAD_CLASSIC_BUTTON_FULL_R));
+                }
 
                 float rx, ry;
                 StickVector(data->exp.classic.rjs, &rx, &ry);
@@ -453,15 +569,28 @@ void WiiInputManager::PollControllers(CKBYTE wanted[WII_KEYBOARD_SIZE], CKDWORD 
 
             const float x = PAD_StickX(chan) / 80.0f;
             const float y = PAD_StickY(chan) / 80.0f;
-            StickToArrows(x, y, wanted);
-            Press(wanted, DIK_UP, held & PAD_BUTTON_UP);
-            Press(wanted, DIK_DOWN, held & PAD_BUTTON_DOWN);
-            Press(wanted, DIK_LEFT, held & PAD_BUTTON_LEFT);
-            Press(wanted, DIK_RIGHT, held & PAD_BUTTON_RIGHT);
-            Press(wanted, DIK_RETURN, held & PAD_BUTTON_A);
-            Press(wanted, DIK_ESCAPE, held & (PAD_BUTTON_B | PAD_BUTTON_START));
-            Press(wanted, DIK_LSHIFT, held & (PAD_BUTTON_Y | PAD_TRIGGER_L | PAD_TRIGGER_Z));
-            Press(wanted, DIK_SPACE, held & (PAD_BUTTON_X | PAD_TRIGGER_R));
+            if (m_TextInput)
+            {
+                const u32 down = PAD_ButtonsDown(chan);
+                Move(keys, Axis(held, PAD_BUTTON_LEFT, PAD_BUTTON_RIGHT), Axis(held, PAD_BUTTON_UP, PAD_BUTTON_DOWN));
+                MoveWithStick(keys, x, y);
+                keys.Press |= (down & PAD_BUTTON_A) != 0;
+                keys.Delete |= (down & PAD_BUTTON_B) != 0;
+                keys.Confirm |= (down & PAD_BUTTON_START) && !(held & PAD_TRIGGER_Z);
+                keys.Shift |= (down & PAD_BUTTON_Y) != 0;
+            }
+            else
+            {
+                StickToArrows(x, y, wanted);
+                Press(wanted, DIK_UP, held & PAD_BUTTON_UP);
+                Press(wanted, DIK_DOWN, held & PAD_BUTTON_DOWN);
+                Press(wanted, DIK_LEFT, held & PAD_BUTTON_LEFT);
+                Press(wanted, DIK_RIGHT, held & PAD_BUTTON_RIGHT);
+                Press(wanted, DIK_RETURN, held & PAD_BUTTON_A);
+                Press(wanted, DIK_ESCAPE, held & (PAD_BUTTON_B | PAD_BUTTON_START));
+                Press(wanted, DIK_LSHIFT, held & (PAD_BUTTON_Y | PAD_TRIGGER_L | PAD_TRIGGER_Z));
+                Press(wanted, DIK_SPACE, held & (PAD_BUTTON_X | PAD_TRIGGER_R));
+            }
 
             if (!joystick.Attached)
             {
@@ -510,7 +639,9 @@ void WiiInputManager::PollPointer()
             angle = data->ir.angle;
         }
     }
-    wiisystem::SetPointer(m_CursorVisible && m_PointerOnScreen, m_MousePosition.x, m_MousePosition.y, angle);
+    // The screen keyboard needs the pointer even when the game hides its cursor.
+    wiisystem::SetPointer((m_CursorVisible || m_TextInput) && m_PointerOnScreen, m_MousePosition.x, m_MousePosition.y,
+                          angle);
 }
 
 // ---------------------------------------------------------------------------

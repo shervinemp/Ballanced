@@ -40,6 +40,7 @@ void RunPhysicsTests(CKContext *context);
 void RunFontTests(CKContext *context);
 void RunBehaviorTests(CKContext *context);
 void RunDatabaseTests(CKContext *context);
+void RunInputTests(CKContext *context);
 void BuildDemoComposition(CKContext *context);
 
 #endif // WIITESTS_TESTFRAMEWORK_H
