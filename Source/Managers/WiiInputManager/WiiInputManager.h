@@ -17,7 +17,8 @@
  *
  *   Wii Remote held sideways   D-Pad = arrows, 1 = Shift (rotate camera),
  *                              2 = Space (overhead camera), + = Esc, A = Enter
- *   Wii Remote pointing        pointer = mouse, A = click (Enter when off screen),
+ *   Wii Remote pointing        pointer = mouse, A = click while the game reads the
+ *                              mouse buttons (Enter otherwise and off screen),
  *                              B = Esc, D-Pad = arrows
  *   Nunchuk                    stick = arrows, Z = Shift, C = Space
  *   Classic / GameCube pad     stick or D-Pad = arrows, A = Enter, B = Esc,
@@ -110,6 +111,7 @@ private:
     void PollUsbKeyboard(CKDWORD now);
     void PollControllers(CKBYTE wanted[WII_KEYBOARD_SIZE], CKDWORD now);
     void PollPointer();
+    CKBOOL MouseButtonsInUse() const;
     void UpdateScreenKeyboard(CKDWORD now);
     void ReleaseTypedKeys(CKDWORD now);
     void PressKey(CKDWORD key, CKDWORD now);
@@ -134,6 +136,8 @@ private:
     CKBYTE m_MouseButtons[4];
     CKBYTE m_LastMouseButtons[4];
     CKBOOL m_PointerOnScreen;
+    CKDWORD m_Frame;            // PreProcess calls
+    CKDWORD m_MouseButtonsRead; // Frame the game last read the mouse buttons
     int m_PointerChannel;
 
     CKBOOL m_TextInput;

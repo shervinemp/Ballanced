@@ -151,6 +151,8 @@ WiiInputManager::WiiInputManager(CKContext *context) : CKInputManager(context, (
     m_PointerChannel = -1;
     m_ControllersConnected = 0;
     m_TextInput = FALSE;
+    m_Frame = 0;
+    m_MouseButtonsRead = 0;
     memset(&m_KeyboardControls, 0, sizeof(m_KeyboardControls));
     m_TypedCount = 0;
     m_Paused = FALSE;
@@ -231,6 +233,7 @@ CKERROR WiiInputManager::OnCKPlay()
 CKERROR WiiInputManager::PreProcess()
 {
     const CKDWORD now = Milliseconds();
+    ++m_Frame;
 
     m_KeyBufferCount = 0;
     memcpy(m_LastMouseButtons, m_MouseButtons, sizeof(m_MouseButtons));
@@ -495,8 +498,9 @@ void WiiInputManager::PollControllers(CKBYTE wanted[WII_KEYBOARD_SIZE], CKDWORD 
                 Press(wanted, DIK_LSHIFT, held & WPAD_BUTTON_1);
                 Press(wanted, DIK_SPACE, held & WPAD_BUTTON_2);
                 Press(wanted, DIK_ESCAPE, held & (WPAD_BUTTON_PLUS | WPAD_BUTTON_MINUS | WPAD_BUTTON_B));
-                // A clicks what the pointer is on; off screen it confirms like Enter.
-                if (pointing)
+                // A clicks what the pointer is on while the game reads the mouse
+                // buttons; otherwise, and off screen, it confirms like Enter.
+                if (pointing && MouseButtonsInUse())
                     pointerClick = pointerClick || (held & WPAD_BUTTON_A);
                 else
                     Press(wanted, DIK_RETURN, held & WPAD_BUTTON_A);
@@ -745,26 +749,36 @@ static int MouseButtonIndex(CK_MOUSEBUTTON button)
     return (button >= CK_MOUSEBUTTON_LEFT && button <= CK_MOUSEBUTTON_4) ? (int)button : -1;
 }
 
+// Menus driven by the keyboard never ask for the mouse buttons.
+CKBOOL WiiInputManager::MouseButtonsInUse() const
+{
+    return m_MouseButtonsRead != 0 && m_Frame - m_MouseButtonsRead <= 30;
+}
+
 CKBOOL WiiInputManager::IsMouseButtonDown(CK_MOUSEBUTTON iButton)
 {
+    m_MouseButtonsRead = m_Frame;
     const int index = MouseButtonIndex(iButton);
     return index >= 0 && (m_MouseButtons[index] & KS_PRESSED) != 0;
 }
 
 CKBOOL WiiInputManager::IsMouseClicked(CK_MOUSEBUTTON iButton)
 {
+    m_MouseButtonsRead = m_Frame;
     const int index = MouseButtonIndex(iButton);
     return index >= 0 && (m_MouseButtons[index] & KS_PRESSED) && !(m_LastMouseButtons[index] & KS_PRESSED);
 }
 
 CKBOOL WiiInputManager::IsMouseToggled(CK_MOUSEBUTTON iButton)
 {
+    m_MouseButtonsRead = m_Frame;
     const int index = MouseButtonIndex(iButton);
     return index >= 0 && (m_MouseButtons[index] & KS_RELEASED) != 0;
 }
 
 void WiiInputManager::GetMouseButtonsState(CKBYTE oStates[4])
 {
+    m_MouseButtonsRead = m_Frame;
     memcpy(oStates, m_MouseButtons, sizeof(m_MouseButtons));
 }
 
