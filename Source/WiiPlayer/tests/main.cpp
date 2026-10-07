@@ -77,6 +77,8 @@ int main(int argc, char **argv)
 
     RunRasterizerTests();
     RunSceneTests(context);
+    if (storage)
+        BuildDemoComposition(context);
 
     char summary[160];
     snprintf(summary, sizeof(summary), "  %d checks, %d failed.", wiitest::CheckCount(), wiitest::FailureCount());

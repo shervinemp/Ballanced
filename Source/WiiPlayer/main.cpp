@@ -47,6 +47,8 @@ int main(int argc, char **argv)
                  "  Database.tdb and the 3D Entities, Sounds, Textures and Text\n"
                  "  folders) to %s next to boot.dol.", gamePath);
         wiisystem::ShowMessage("The Ballance game files were not found.", message);
+        // Close the log while the storage device is still mounted.
+        CLogger::Get().Close();
         wiisystem::Exit();
     }
 
