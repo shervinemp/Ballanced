@@ -297,6 +297,45 @@ cmake --build build/manual --target stage
 ctest --test-dir build/manual --output-on-failure
 ```
 
+## Nintendo Wii
+
+The Wii build is one Homebrew Channel application with every module linked in. libogc takes SDL3's place: `Source/WiiPlatform` provides the VxMath platform layer and system services, `Source/WiiRasterizer` renders with GX, and `Source/Managers/WiiInputManager` and `WiiSoundManager` stand in for the SDL3 managers. Shared engine code that needs big-endian or Wii-specific changes is patched at configure time from `Source/WiiPatches` (see `cmake/WiiPort.cmake`), so the submodules stay unmodified.
+
+### Building
+
+Install devkitPro with the `wii-dev` package group, then configure and build from a devkitPro shell (the devkitPro MSYS2 shell on Windows):
+
+```bash
+cmake -S . -B build/wii -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/wii.cmake -DCMAKE_BUILD_TYPE=Release
+cmake --build build/wii --target WiiPlayer WiiPlayerTests
+```
+
+This produces `build/wii/Source/WiiPlayer/boot.dol` (the game) and `tests.dol` (the on-console tests).
+
+### Installing
+
+`cmake --install build/wii --prefix <SD card root>` writes `boot.dol`, `meta.xml` and `icon.png` to `apps/ballance/`. Copy the game files from your own Ballance installation into the same folder:
+
+```
+apps/ballance/
+  boot.dol
+  meta.xml
+  icon.png
+  base.cmo
+  Database.tdb
+  3D Entities/
+  Sounds/
+  Text/
+  Textures/
+  Fonts/          optional: TrueType fonts for text drawn with system fonts
+```
+
+Start it from the Homebrew Channel. The game runs from the folder `boot.dol` was started from, on an SD card or a USB drive; when the loader passes no path it looks for `apps/ballance/` or `ballance/` on either device. `Player.ini` and `Player.log` are written to that folder.
+
+### On-console tests
+
+`tests.dol` checks state chunk and file byte layouts, media readers and writers, sound playback, fonts, GX rasterizer output, physics and a render engine scene, and writes a small demo composition to `sd:/apps/ballance-demo/base.cmo`. Copy it to `apps/wiitests/boot.dol` and start it; results appear on screen and in `sd:/wiitests.log`. In Dolphin, enable SD card folder sync and, under Graphics > Hacks, turn off "Skip EFB Access from CPU" and "Store EFB Copies to Texture Only" so the rasterizer checks can read the frame back.
+
 ## Troubleshooting
 
 ### `stage` fails after CMake file changes
