@@ -44,6 +44,11 @@ if (WII)
     # No dynamic loader either: the dlfcn.h stubs in Source/WiiPlatform/include
     # stand in for libdl, so components must not link it.
     set(CMAKE_DL_LIBS "")
+    # devkitPPC compiles thread_local to r2-relative TLS, but libogc sets no
+    # thread pointer and its linker script has no TLS segment, so such variables
+    # read garbage. The engine only uses them on the game thread (blit caches,
+    # animation merging, stb flags): make them ordinary variables.
+    add_compile_definitions("$<$<COMPILE_LANGUAGE:CXX>:thread_local=>")
 else ()
     find_package(SDL3 3.4.8 CONFIG REQUIRED)
 endif ()

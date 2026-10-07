@@ -108,6 +108,29 @@ add_custom_command(TARGET WiiPlayer POST_BUILD
         VERBATIM
 )
 
+# On-console tests (tests.dol): state chunk and file byte layouts, media
+# readers and GX rasterizer pixels. Run from the SD card or in Dolphin.
+add_executable(WiiPlayerTests
+        tests/main.cpp
+        tests/TestFramework.cpp
+        tests/TestFramework.h
+        tests/ChunkTests.cpp
+        tests/FileTests.cpp
+        tests/ReaderTests.cpp
+        tests/RasterizerTests.cpp
+        "${_player_src}/StaticPlugins.cpp"
+)
+target_compile_features(WiiPlayerTests PRIVATE cxx_std_17)
+target_compile_definitions(WiiPlayerTests PRIVATE BALLANCE_STATIC_MODULES ${_static_definitions})
+target_include_directories(WiiPlayerTests PRIVATE "${_player_src}" "${_generated}")
+target_link_libraries(WiiPlayerTests PRIVATE ${_static_targets} CKGXRasterizer CK2 VxMath WiiSystem)
+set_target_properties(WiiPlayerTests PROPERTIES OUTPUT_NAME tests SUFFIX ".elf")
+ogc_create_dol(WiiPlayerTests)
+add_custom_command(TARGET WiiPlayerTests POST_BUILD
+        COMMAND "${PADBIN_EXE}" 32 "$<TARGET_FILE_DIR:WiiPlayerTests>/tests.dol"
+        VERBATIM
+)
+
 # Homebrew Channel layout: apps/ballance/{boot.dol,meta.xml,icon.png}; the
 # game files are copied next to them.
 install(FILES

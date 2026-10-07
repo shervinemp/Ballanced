@@ -129,7 +129,9 @@ void CKGXRasterizerContext::CopyToScreen()
     GX_SetZMode(GX_TRUE, GX_LEQUAL, GX_TRUE);
     GX_SetColorUpdate(GX_TRUE);
     m_FrameBuffer ^= 1;
-    GX_CopyDisp(m_FrameBuffers[m_FrameBuffer], GX_TRUE);
+    // Clear() draws its own quad, so the copy keeps the EFB: readbacks after
+    // BackToFront see the frame just presented.
+    GX_CopyDisp(m_FrameBuffers[m_FrameBuffer], GX_FALSE);
     GX_DrawDone();
     VIDEO_SetNextFramebuffer(m_FrameBuffers[m_FrameBuffer]);
     VIDEO_Flush();

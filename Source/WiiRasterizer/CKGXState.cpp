@@ -501,19 +501,36 @@ int CKGXRasterizerContext::ApplyTextureStages(const VertexSource &source, CKBOOL
             if (generation == CKRST_TEXGEN_SPHEREMAP || generation == CKRST_TEXGEN_CAMERASPACEREFLECTIONVECTOR ||
                 generation == CKRST_TEXGEN_CAMERASPACENORMAL)
             {
-                // Sphere mapping from the eye-space normal: uv = n.xy * (0.5, -0.5) + 0.5.
+                // Sphere mapping from the eye-space normal e: uv = (e, 1) * M, with
+                // the stage's texture matrix (Virtools uses scale 0.4, offset 0.5)
+                // or uv = e.xy * (0.5, -0.5) + 0.5 without one. GX eye space has z
+                // negated, and its texgen feeds the object normal, so the normal
+                // matrix is folded in.
                 Mtx modelView, normal;
                 ToGXModelView(m_Matrices[CKRSTMatrixSlot(VXMATRIX_WORLD)], m_Matrices[CKRSTMatrixSlot(VXMATRIX_VIEW)], modelView);
                 ToGXNormalMatrix(modelView, normal);
+                VxMatrix m;
+                if (transformFlags & 0xFF)
+                {
+                    m = m_Matrices[CKRSTMatrixSlot(VXMATRIX_TEXTURE(s))];
+                }
+                else
+                {
+                    Vx3DMatrixIdentity(m);
+                    m[0][0] = 0.5f;
+                    m[1][1] = -0.5f;
+                    m[3][0] = 0.5f;
+                    m[3][1] = 0.5f;
+                }
                 Mtx sphere;
                 for (int c = 0; c < 3; ++c)
                 {
-                    sphere[0][c] = normal[0][c] * 0.5f;
-                    sphere[1][c] = -normal[1][c] * 0.5f;
+                    sphere[0][c] = normal[0][c] * m[0][0] + normal[1][c] * m[1][0] - normal[2][c] * m[2][0];
+                    sphere[1][c] = normal[0][c] * m[0][1] + normal[1][c] * m[1][1] - normal[2][c] * m[2][1];
                     sphere[2][c] = 0.0f;
                 }
-                sphere[0][3] = 0.5f;
-                sphere[1][3] = 0.5f;
+                sphere[0][3] = m[3][0];
+                sphere[1][3] = m[3][1];
                 sphere[2][3] = 1.0f;
                 GX_LoadTexMtxImm(sphere, matrixId, GX_MTX2x4);
                 GX_SetTexCoordGen(texCoord, GX_TG_MTX2x4, GX_TG_NRM, matrixId);
@@ -531,11 +548,12 @@ int CKGXRasterizerContext::ApplyTextureStages(const VertexSource &source, CKBOOL
                 }
                 else if (transformFlags & 0xFF)
                 {
-                    // Direct3D: (u, v, 1) * M; GX: M * (s, t, 1).
+                    // Virtools: (u, v, 0, 1) * M, translation in row 3. GX feeds
+                    // (s, t, 1, 1) to M * v, so row 3 becomes the last column.
                     const VxMatrix &m = m_Matrices[CKRSTMatrixSlot(VXMATRIX_TEXTURE(s))];
                     Mtx texture = {
-                        {m[0][0], m[1][0], m[2][0], 0.0f},
-                        {m[0][1], m[1][1], m[2][1], 0.0f},
+                        {m[0][0], m[1][0], 0.0f, m[3][0]},
+                        {m[0][1], m[1][1], 0.0f, m[3][1]},
                         {0.0f, 0.0f, 1.0f, 0.0f},
                     };
                     GX_LoadTexMtxImm(texture, matrixId, GX_MTX2x4);
@@ -803,24 +821,30 @@ void CKGXRasterizerContext::ApplyPixelState(CKBOOL pretransformed)
     GX_SetPointSize((u8)(pointSize > 0.0f && pointSize < 42.0f ? pointSize * 6.0f : 6.0f), GX_TO_ZERO);
     GX_SetLineWidth(6, GX_TO_ZERO);
 
-    // Fog, in eye-space distance.
+    // Fog, in eye-space depth. GX derives it from the depth value, so it needs
+    // the near and far planes of a perspective (w = z) or orthographic
+    // (affine depth) projection.
     const CKDWORD fogMode = rs[VXRENDERSTATE_FOGPIXELMODE] ? rs[VXRENDERSTATE_FOGPIXELMODE] : rs[VXRENDERSTATE_FOGVERTEXMODE];
     const VxMatrix &p = m_Matrices[CKRSTMatrixSlot(VXMATRIX_PROJECTION)];
-    if (!pretransformed && rs[VXRENDERSTATE_FOGENABLE] && fogMode != VXFOG_NONE && p[3][3] == 0.0f && p[2][2] != 0.0f &&
-        p[2][2] != 1.0f)
+    const bool perspective = p[3][3] == 0.0f && p[2][2] != 0.0f && p[2][2] != 1.0f;
+    const bool orthographic = p[2][3] == 0.0f && p[3][3] != 0.0f && p[2][2] != 0.0f;
+    if (!pretransformed && rs[VXRENDERSTATE_FOGENABLE] && fogMode != VXFOG_NONE && (perspective || orthographic))
     {
         const float zNear = -p[3][2] / p[2][2];
-        const float zFar = p[2][2] * zNear / (p[2][2] - 1.0f);
+        const float zFar = perspective ? p[2][2] * zNear / (p[2][2] - 1.0f) : (p[3][3] - p[3][2]) / p[2][2];
         float start = AsFloat(rs[VXRENDERSTATE_FOGSTART]);
         float end = AsFloat(rs[VXRENDERSTATE_FOGEND]);
-        u8 type = GX_FOG_PERSP_LIN;
+        u8 type = perspective ? GX_FOG_PERSP_LIN : GX_FOG_ORTHO_LIN;
         if (fogMode == VXFOG_EXP || fogMode == VXFOG_EXP2)
         {
             // GX exponential fog spans start..end; reach ~95% where Direct3D would.
             const float density = AsFloat(rs[VXRENDERSTATE_FOGDENSITY]);
             start = 0.0f;
             end = density > 0.0f ? (fogMode == VXFOG_EXP ? 3.0f : 1.73f) / density : zFar;
-            type = fogMode == VXFOG_EXP ? GX_FOG_PERSP_EXP : GX_FOG_PERSP_EXP2;
+            if (perspective)
+                type = fogMode == VXFOG_EXP ? GX_FOG_PERSP_EXP : GX_FOG_PERSP_EXP2;
+            else
+                type = fogMode == VXFOG_EXP ? GX_FOG_ORTHO_EXP : GX_FOG_ORTHO_EXP2;
         }
         GX_SetFog(type, start, end, zNear, zFar, ToGXColor(rs[VXRENDERSTATE_FOGCOLOR]));
     }

@@ -137,6 +137,77 @@ CKBOOL CKGXRasterizerContext::Submit(VXPRIMITIVETYPE type, const VertexSource &s
         texcoordSets = i + 1;
     }
 
+    auto vertexIndex = [&](int i) -> CKDWORD {
+        CKDWORD index = indices ? (CKDWORD)indices[i] : (CKDWORD)i;
+        index += baseVertex;
+        return index < vertexCount ? index : 0;
+    };
+    // Position and texture coordinates from one vertex, normal and colour
+    // from another (the same one unless flat shading).
+    auto emit = [&](CKDWORD index, CKDWORD attributes) {
+        const float *position = (const float *)(source.Position + (size_t)index * source.PositionStride);
+        GX_Position3f32(position[0], position[1], position[2]);
+        if (sendNormal)
+        {
+            const float *normal = (const float *)(source.Normal + (size_t)attributes * source.NormalStride);
+            GX_Normal3f32(normal[0], normal[1], normal[2]);
+        }
+        if (sendColor)
+            GX_Color1u32(ToRGBA(*(const u32 *)(source.Diffuse + (size_t)attributes * source.DiffuseStride)));
+        for (int set = 0; set < texcoordSets; ++set)
+        {
+            const float *uv = (const float *)(source.Texcoord[set] + (size_t)index * source.TexcoordStride[set]);
+            GX_TexCoord2f32(uv[0], uv[1]);
+        }
+    };
+
+    // GX always interpolates. Direct3D flat shading gives each triangle the
+    // colour of its first vertex (the second for fans), so send separate
+    // triangles that repeat it; strips keep their alternating winding.
+    const bool flat = m_RenderStates[VXRENDERSTATE_SHADEMODE] == VXSHADE_FLAT && (sendColor || sendNormal) &&
+                      (type == VX_TRIANGLELIST || type == VX_TRIANGLESTRIP || type == VX_TRIANGLEFAN);
+    if (flat)
+    {
+        const int triangles = (int)PrimitiveCount(type, count);
+        const int perBatch = 65535 / 3;
+        for (int first = 0; first < triangles; first += perBatch)
+        {
+            const int n = (triangles - first) < perBatch ? (triangles - first) : perBatch;
+            GX_Begin(GX_TRIANGLES, GX_VTXFMT0, (u16)(n * 3));
+            for (int t = first; t < first + n; ++t)
+            {
+                int v[3];
+                int provoking;
+                if (type == VX_TRIANGLESTRIP)
+                {
+                    v[0] = (t & 1) ? t + 1 : t;
+                    v[1] = (t & 1) ? t : t + 1;
+                    v[2] = t + 2;
+                    provoking = t;
+                }
+                else if (type == VX_TRIANGLEFAN)
+                {
+                    v[0] = 0;
+                    v[1] = t + 1;
+                    v[2] = t + 2;
+                    provoking = t + 1;
+                }
+                else
+                {
+                    v[0] = 3 * t;
+                    v[1] = 3 * t + 1;
+                    v[2] = 3 * t + 2;
+                    provoking = 3 * t;
+                }
+                const CKDWORD attributes = vertexIndex(provoking);
+                for (int k = 0; k < 3; ++k)
+                    emit(vertexIndex(v[k]), attributes);
+            }
+            GX_End();
+        }
+        return TRUE;
+    }
+
     const u8 primitive = GXPrimitive(type);
     int batch = BatchSize(type);
     if (batch == 0)
@@ -155,25 +226,8 @@ CKBOOL CKGXRasterizerContext::Submit(VXPRIMITIVETYPE type, const VertexSource &s
         GX_Begin(primitive, GX_VTXFMT0, (u16)n);
         for (int i = 0; i < n; ++i)
         {
-            CKDWORD index = indices ? (CKDWORD)indices[start + i] : (CKDWORD)(start + i);
-            index += baseVertex;
-            if (index >= vertexCount)
-                index = 0;
-
-            const float *position = (const float *)(source.Position + (size_t)index * source.PositionStride);
-            GX_Position3f32(position[0], position[1], position[2]);
-            if (sendNormal)
-            {
-                const float *normal = (const float *)(source.Normal + (size_t)index * source.NormalStride);
-                GX_Normal3f32(normal[0], normal[1], normal[2]);
-            }
-            if (sendColor)
-                GX_Color1u32(ToRGBA(*(const u32 *)(source.Diffuse + (size_t)index * source.DiffuseStride)));
-            for (int set = 0; set < texcoordSets; ++set)
-            {
-                const float *uv = (const float *)(source.Texcoord[set] + (size_t)index * source.TexcoordStride[set]);
-                GX_TexCoord2f32(uv[0], uv[1]);
-            }
+            const CKDWORD index = vertexIndex(start + i);
+            emit(index, index);
         }
         GX_End();
     }
