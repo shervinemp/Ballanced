@@ -1,32 +1,21 @@
-set(CMAKE_SYSTEM_NAME Generic)
-set(CMAKE_SYSTEM_PROCESSOR powerpc)
-set(WII ON CACHE BOOL "Building for Nintendo Wii" FORCE)
+# Toolchain file for building Ballanced for the Nintendo Wii.
+#
+# Wraps devkitPro's official Wii toolchain, which provides the Broadway CPU
+# flags, the libogc link line and the ogc_create_dol() helper. Configure from
+# a devkitPro environment (the devkitPro MSYS2 shell on Windows):
+#
+#   cmake -S . -B build/wii -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/wii.cmake
 
-# Setup devkitPro paths
-if(NOT DEFINED ENV{DEVKITPRO})
+if (NOT DEFINED ENV{DEVKITPRO})
     set(ENV{DEVKITPRO} "/opt/devkitpro")
-endif()
-if(NOT DEFINED ENV{DEVKITPPC})
-    set(ENV{DEVKITPPC} "/opt/devkitpro/devkitPPC")
-endif()
+endif ()
 
-set(DEVKITPRO $ENV{DEVKITPRO})
-set(DEVKITPPC $ENV{DEVKITPPC})
+if (NOT EXISTS "$ENV{DEVKITPRO}/cmake/Wii.cmake")
+    message(FATAL_ERROR
+            "devkitPro's Wii toolchain was not found under $ENV{DEVKITPRO}. "
+            "Install the wii-dev package group and configure from a devkitPro shell.")
+endif ()
 
-if (EXISTS "${DEVKITPPC}/bin/powerpc-eabi-gcc")
-    set(CMAKE_C_COMPILER "${DEVKITPPC}/bin/powerpc-eabi-gcc")
-    set(CMAKE_CXX_COMPILER "${DEVKITPPC}/bin/powerpc-eabi-g++")
-    set(CMAKE_ASM_COMPILER "${DEVKITPPC}/bin/powerpc-eabi-gcc")
+include("$ENV{DEVKITPRO}/cmake/Wii.cmake")
 
-    set(MACH_DEP "-mrvl -mcpu=750 -meabi -mhard-float -mno-fused-madd")
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${MACH_DEP} -DGEKKO -DHW_RVL -DWII=1" CACHE STRING "" FORCE)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MACH_DEP} -DGEKKO -DHW_RVL -DWII=1" CACHE STRING "" FORCE)
-    set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} ${MACH_DEP} -DGEKKO -DHW_RVL -DWII=1" CACHE STRING "" FORCE)
-endif()
-
-# LibOGC
-set(LIBOGC_INC "${DEVKITPRO}/libogc/include")
-set(LIBOGC_LIB "${DEVKITPRO}/libogc/lib/wii")
-
-include_directories(${LIBOGC_INC})
-link_directories(${LIBOGC_LIB})
+set(WII ON CACHE BOOL "Building for the Nintendo Wii" FORCE)

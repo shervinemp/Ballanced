@@ -1,0 +1,17 @@
+--- a/BuildingBlocksAddons1/TextureProcessing.h
++++ b/BuildingBlocksAddons1/TextureProcessing.h
+@@ -33,7 +33,6 @@
+ 
+ void ConvolveTexture3x3(CKTexture *texture, int kernel[3][3], int scale);
+ 
+-#if defined(_M_IX86) || defined(_M_X64) || defined(_M_ARM64) || defined(_M_ARM64EC) || defined(__i386__) || defined(__x86_64__) || defined(__aarch64__)
+ void ConvolvePaddedPixels3x3(const CKDWORD *paddedSource,
+                              CKDWORD *destination,
+                              int width,
+@@ -62,6 +61,5 @@
+                              const CKDWORD *second,
+                              int pixelCount,
+                              float blendFactor);
+-#endif
+ 
+ #endif // TEXTUREPROCESSING_H

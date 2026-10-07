@@ -1,0 +1,16 @@
+--- a/Materials-Textures/Behaviors/TextureSinus.cpp
++++ b/Materials-Textures/Behaviors/TextureSinus.cpp
+@@ -149,11 +149,11 @@
+             return 0;
+         int nbvert = mesh->GetModifierUVCount();
+         // we get the saved uv's
+-        DWORD *savedUV = (DWORD *)beh->GetLocalParameterWriteDataPtr(0);
++        CKDWORD *savedUV = (CKDWORD *)beh->GetLocalParameterWriteDataPtr(0);
+ 
+         for (int i = 0; i < nbvert * 2; i++)
+         {
+-            savedUV[i] = ENDIANSWAP32(savedUV[i]);
++            ENDIANSWAP32(savedUV[i]);
+         }
+     }
+     break;

@@ -32,7 +32,12 @@ ballance_set_cache_default(BALLANCE_BUILD_STATIC OFF BOOL
 ballance_set_cache_default(BALLANCE_TARGET_ARCH "" STRING
         "Optional target architecture label used by platform presets")
 
-if (NOT WII)
+if (WII)
+    # libogc replaces SDL3 on the Wii. Components that link SDL3::SDL3 for their
+    # desktop platform layer get an empty target; Source/WiiPlatform supplies the
+    # native implementations (see cmake/WiiPort.cmake).
+    add_library(SDL3::SDL3 INTERFACE IMPORTED GLOBAL)
+else ()
     find_package(SDL3 3.4.8 CONFIG REQUIRED)
 endif ()
 
@@ -82,4 +87,6 @@ endif ()
 if (WII)
     # SDL GPU has no Wii backend; the GX rasterizer is built from Source/WiiRasterizer.
     ballance_set_cache_default(CKRE_BUILD_SDL_GPU_RASTERIZER OFF BOOL "")
+    # Broadway has no SSE; SIMDe would only emulate it in scalar code.
+    ballance_set_cache_default(VXMATH_ENABLE_SIMD OFF BOOL "")
 endif ()

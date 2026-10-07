@@ -8,6 +8,10 @@ configure_file("${CMAKE_CURRENT_LIST_DIR}/RuntimeComponents.cmake.in"
 set(_ballance_component_manifest "${CMAKE_CURRENT_BINARY_DIR}/RuntimeComponents.cmake")
 
 set(_ballance_can_run_target_executables ON)
+if (WII)
+    # Wii executables only run on the console or in an emulator.
+    set(_ballance_can_run_target_executables OFF)
+endif ()
 if (WIN32 AND CMAKE_GENERATOR_PLATFORM)
     string(TOLOWER "${CMAKE_GENERATOR_PLATFORM}" _ballance_target_platform_lc)
     string(TOLOWER "${CMAKE_HOST_SYSTEM_PROCESSOR}" _ballance_host_processor_lc)

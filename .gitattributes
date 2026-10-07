@@ -1,0 +1,2 @@
+# Applied with git apply by cmake/WiiPort.cmake; keep their line endings stable.
+Source/WiiPatches/**/*.patch text eol=lf
