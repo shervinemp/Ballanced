@@ -33,10 +33,10 @@ index 8c0061c..2f5a424 100644
  
  /// Resolve a palette index to a packed 32bpp ARGB colour.
 diff --git a/ImageReader/BmpReader.cpp b/ImageReader/BmpReader.cpp
-index 46033f2..c4f6341 100644
+index 46033f2..32535e4 100644
 --- a/ImageReader/BmpReader.cpp
 +++ b/ImageReader/BmpReader.cpp
-@@ -4,6 +4,15 @@
+@@ -4,6 +4,17 @@
  
  #include <limits>
  
@@ -48,11 +48,13 @@ index 46033f2..c4f6341 100644
 +static CKWORD FromLE16(CKWORD value) { return value; }
 +static CKDWORD FromLE32(CKDWORD value) { return value; }
 +#endif
++static CKWORD ToLE16(CKWORD value) { return FromLE16(value); }
++static CKDWORD ToLE32(CKDWORD value) { return FromLE32(value); }
 +
  //=============================================================================
  // Data Source Abstraction - Unified file/memory reading
  //=============================================================================
-@@ -357,7 +366,7 @@ static void DecodeRow16bpp(const XBYTE *src, XBYTE *dst, CKDWORD width,
+@@ -357,7 +368,7 @@ static void DecodeRow16bpp(const XBYTE *src, XBYTE *dst, CKDWORD width,
  {
      for (CKDWORD x = 0; x < width; x++)
      {
@@ -61,7 +63,7 @@ index 46033f2..c4f6341 100644
          if (useMasks && rMask && gMask && bMask)
          {
              dst[x * 4 + 0] = ExtractMaskedComponent<CKWORD>(pixel, bMask);
-@@ -391,7 +400,8 @@ static void DecodeRow32bpp(const XBYTE *src, XBYTE *dst, CKDWORD width,
+@@ -391,7 +402,8 @@ static void DecodeRow32bpp(const XBYTE *src, XBYTE *dst, CKDWORD width,
  {
      for (CKDWORD x = 0; x < width; x++)
      {
@@ -71,7 +73,7 @@ index 46033f2..c4f6341 100644
          if (useMasks && rMask && gMask && bMask)
          {
              dst[x * 4 + 0] = ExtractMaskedComponent<CKDWORD>(pixel, bMask);
-@@ -431,12 +441,16 @@ static int ParseBmpHeader(BmpDataSource &src, BmpHeader &hdr)
+@@ -431,12 +443,16 @@ static int ParseBmpHeader(BmpDataSource &src, BmpHeader &hdr)
      BITMAPFILEHEADER fileHdr;
      if (!src.Read(&fileHdr, sizeof(fileHdr)))
          return CKBITMAPERROR_READERROR;
@@ -88,7 +90,7 @@ index 46033f2..c4f6341 100644
  
      if (hdr.headerSize == 12)
      {
-@@ -444,6 +458,10 @@ static int ParseBmpHeader(BmpDataSource &src, BmpHeader &hdr)
+@@ -444,6 +460,10 @@ static int ParseBmpHeader(BmpDataSource &src, BmpHeader &hdr)
          core.bcSize = hdr.headerSize;
          if (!src.Read(&core.bcWidth, 8))
              return CKBITMAPERROR_READERROR;
@@ -99,7 +101,7 @@ index 46033f2..c4f6341 100644
          hdr.width = core.bcWidth;
          hdr.height = core.bcHeight;
          hdr.planes = core.bcPlanes;
-@@ -457,6 +475,16 @@ static int ParseBmpHeader(BmpDataSource &src, BmpHeader &hdr)
+@@ -457,6 +477,16 @@ static int ParseBmpHeader(BmpDataSource &src, BmpHeader &hdr)
          CKDWORD toRead = (hdr.headerSize > sizeof(info)) ? sizeof(info) - 4 : hdr.headerSize - 4;
          if (!src.Read(&info.biWidth, toRead))
              return CKBITMAPERROR_READERROR;
@@ -116,7 +118,7 @@ index 46033f2..c4f6341 100644
          if (hdr.headerSize > sizeof(info))
          {
              const CKDWORD extraHeaderSize = hdr.headerSize - sizeof(info);
-@@ -497,6 +525,10 @@ static int ParseBmpHeader(BmpDataSource &src, BmpHeader &hdr)
+@@ -497,6 +527,10 @@ static int ParseBmpHeader(BmpDataSource &src, BmpHeader &hdr)
                  !src.ReadAt(base + 8, &hdr.blueMask, 4) ||
                  (hdr.headerSize >= 56 && !src.ReadAt(base + 12, &hdr.alphaMask, 4)))
                  return CKBITMAPERROR_READERROR;
@@ -127,7 +129,7 @@ index 46033f2..c4f6341 100644
          }
      }
      else
-@@ -742,6 +774,10 @@ int BMP_Read(void *data, int size, CKBitmapProperties *props)
+@@ -742,6 +776,10 @@ int BMP_Read(void *data, int size, CKBitmapProperties *props)
              memcpy(&hdr.blueMask, palette.Begin() + 8, 4);
              if (paletteSize >= 16)
                  memcpy(&hdr.alphaMask, palette.Begin() + 12, 4);
@@ -138,8 +140,53 @@ index 46033f2..c4f6341 100644
          }
      }
  
+@@ -902,7 +940,8 @@ int BMP_Save(void **outBuffer, CKBitmapProperties *props, int bitDepth)
+ 
+     CKDWORD width = props->m_Format.Width;
+     CKDWORD height = props->m_Format.Height;
+-    CKBYTE *srcPixels = ImageReader::GetSavePixels(props);
++    XArray<CKBYTE> savePixels;
++    CKBYTE *srcPixels = ImageReader::GetSavePixels(props, savePixels);
+     CKDWORD srcStride = props->m_Format.BytesPerLine;
+ 
+     if (!srcPixels || width == 0 || height == 0)
+@@ -946,22 +985,22 @@ int BMP_Save(void **outBuffer, CKBitmapProperties *props, int bitDepth)
+ 
+     // File header
+     BITMAPFILEHEADER *fh = (BITMAPFILEHEADER *)buffer;
+-    fh->bfType = 0x4D42;
+-    fh->bfSize = fileSize;
++    fh->bfType = ToLE16(0x4D42);
++    fh->bfSize = ToLE32(fileSize);
+     fh->bfReserved1 = fh->bfReserved2 = 0;
+-    fh->bfOffBits = headerSize;
++    fh->bfOffBits = ToLE32(headerSize);
+ 
+     // Info header
+     BITMAPINFOHEADER *ih = (BITMAPINFOHEADER *)(buffer + sizeof(BITMAPFILEHEADER));
+-    ih->biSize = sizeof(BITMAPINFOHEADER);
+-    ih->biWidth = width;
+-    ih->biHeight = height;
+-    ih->biPlanes = 1;
+-    ih->biBitCount = (CKWORD)headerBitDepth;
+-    ih->biCompression = useRle8 ? BI_RLE8 : BI_RGB;
+-    ih->biSizeImage = pixelDataSize;
+-    ih->biXPelsPerMeter = ih->biYPelsPerMeter = 2835;
+-    ih->biClrUsed = (headerBitDepth == 8) ? 256 : 0;
++    ih->biSize = ToLE32(sizeof(BITMAPINFOHEADER));
++    ih->biWidth = ToLE32(width);
++    ih->biHeight = ToLE32(height);
++    ih->biPlanes = ToLE16(1);
++    ih->biBitCount = ToLE16((CKWORD)headerBitDepth);
++    ih->biCompression = ToLE32(useRle8 ? BI_RLE8 : BI_RGB);
++    ih->biSizeImage = ToLE32(pixelDataSize);
++    ih->biXPelsPerMeter = ih->biYPelsPerMeter = ToLE32(2835);
++    ih->biClrUsed = ToLE32((headerBitDepth == 8) ? 256 : 0);
+     ih->biClrImportant = 0;
+ 
+     // Palette
 diff --git a/ImageReader/ImageReader.h b/ImageReader/ImageReader.h
-index e54573e..fe59ba2 100644
+index e54573e..a4a9d01 100644
 --- a/ImageReader/ImageReader.h
 +++ b/ImageReader/ImageReader.h
 @@ -165,6 +165,21 @@ public:
@@ -164,6 +211,49 @@ index e54573e..fe59ba2 100644
          memset(&fmt, 0, sizeof(VxImageDescEx));
          fmt.Size = sizeof(VxImageDescEx);
          fmt.Flags = 0;
+@@ -182,13 +197,36 @@ public:
+         fmt.Image = image;
+     }
+ 
+-    // Pixels to save. CK2 save paths built from GetImageDesc() leave
+-    // m_Format.Image null and pass the surface through m_Data instead.
+-    static CKBYTE *GetSavePixels(CKBitmapProperties *bp)
++    // Pixels to save, as blue, green, red, alpha bytes. CK2 save paths built
++    // from GetImageDesc() leave m_Format.Image null and pass the surface
++    // through m_Data instead. 32-bit pixels are host-order ARGB words, so on
++    // big-endian hosts this returns a byte-reversed copy held in scratch.
++    static CKBYTE *GetSavePixels(CKBitmapProperties *bp, XArray<CKBYTE> &scratch)
+     {
+-        if (bp->m_Format.Image)
+-            return bp->m_Format.Image;
+-        return static_cast<CKBYTE *>(bp->m_Data);
++        CKBYTE *pixels = bp->m_Format.Image ? bp->m_Format.Image : static_cast<CKBYTE *>(bp->m_Data);
++#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
++        const VxImageDescEx &fmt = bp->m_Format;
++        if (pixels && fmt.Width > 0 && fmt.Height > 0 && fmt.BytesPerLine >= fmt.Width * 4)
++        {
++            scratch.Resize(fmt.BytesPerLine * fmt.Height);
++            for (int y = 0; y < fmt.Height; ++y)
++            {
++                const CKBYTE *src = pixels + y * fmt.BytesPerLine;
++                CKBYTE *dst = scratch.Begin() + y * fmt.BytesPerLine;
++                for (int x = 0; x < fmt.Width * 4; x += 4)
++                {
++                    dst[x + 0] = src[x + 3];
++                    dst[x + 1] = src[x + 2];
++                    dst[x + 2] = src[x + 1];
++                    dst[x + 3] = src[x + 0];
++                }
++            }
++            return scratch.Begin();
++        }
++#else
++        (void)scratch;
++#endif
++        return pixels;
+     }
+ 
+     // Shared save-side pixel conversions.
 diff --git a/ImageReader/PcxReader.cpp b/ImageReader/PcxReader.cpp
 index 60caae2..77a8285 100644
 --- a/ImageReader/PcxReader.cpp
@@ -197,10 +287,22 @@ index 60caae2..77a8285 100644
      if (ctx.header.manufacturer != 0x0A)
          return CKBITMAPERROR_UNSUPPORTEDFILE;
 diff --git a/ImageReader/TgaReader.cpp b/ImageReader/TgaReader.cpp
-index 17d64f3..da5b028 100644
+index 17d64f3..fe089f8 100644
 --- a/ImageReader/TgaReader.cpp
 +++ b/ImageReader/TgaReader.cpp
-@@ -311,6 +311,13 @@ static int ParseTgaHeader(TgaDataSource &src, TgaContext &ctx)
+@@ -157,6 +157,11 @@ static CKDWORD MapY(CKDWORD y, CKDWORD h, CKBOOL td, CKBYTE interleave)
+ // Pixel Decoding
+ //=============================================================================
+ static CKWORD ReadLE16(const CKBYTE *p) { return (CKWORD)(p[0] | (p[1] << 8)); }
++static void WriteLE16(CKBYTE *p, CKWORD value)
++{
++    p[0] = (CKBYTE)(value & 0xFF);
++    p[1] = (CKBYTE)(value >> 8);
++}
+ 
+ static void Decode15or16(CKWORD c, CKBYTE alphaBits, CKBYTE out[4])
+ {
+@@ -311,6 +316,13 @@ static int ParseTgaHeader(TgaDataSource &src, TgaContext &ctx)
  {
      if (!src.Read(&ctx.header, sizeof(ctx.header)))
          return CKBITMAPERROR_READERROR;
@@ -214,6 +316,28 @@ index 17d64f3..da5b028 100644
  
      switch (ctx.header.imageType)
      {
+@@ -676,7 +688,8 @@ int TGA_Save(void **outBuffer, CKBitmapProperties *props, int bitDepth, int useR
+ 
+     CKDWORD width = props->m_Format.Width;
+     CKDWORD height = props->m_Format.Height;
+-    CKBYTE *srcPixels = ImageReader::GetSavePixels(props);
++    XArray<CKBYTE> savePixels;
++    CKBYTE *srcPixels = ImageReader::GetSavePixels(props, savePixels);
+     CKDWORD srcStride = props->m_Format.BytesPerLine;
+ 
+     if (!srcPixels || width == 0 || height == 0)
+@@ -694,8 +707,9 @@ int TGA_Save(void **outBuffer, CKBitmapProperties *props, int bitDepth, int useR
+     header.imageType = useRLE
+                            ? (isGreyscale ? TGA_TYPE_RLE_GRAYSCALE : TGA_TYPE_RLE_TRUECOLOR)
+                            : (isGreyscale ? TGA_TYPE_GRAYSCALE : TGA_TYPE_TRUECOLOR);
+-    header.width = (CKWORD)width;
+-    header.height = (CKWORD)height;
++    // The 16-bit header fields are little-endian.
++    WriteLE16((CKBYTE *)&header.width, (CKWORD)width);
++    WriteLE16((CKBYTE *)&header.height, (CKWORD)height);
+     header.pixelDepth = (CKBYTE)saveBitDepth;
+     header.imageDescriptor = (bitDepth == 32) ? 8 : 0;
+ 
 diff --git a/WavReader/WavReader.cpp b/WavReader/WavReader.cpp
 index 9743ece..733dfc4 100644
 --- a/WavReader/WavReader.cpp

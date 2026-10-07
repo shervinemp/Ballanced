@@ -196,6 +196,14 @@ function(ballance_wii_port_vxmath)
     )
     _ballance_wii_resolve_target(_vxmath VxMath)
     target_include_directories(${_vxmath} PUBLIC "$<BUILD_INTERFACE:${BALLANCE_WII_PLATFORM_DIR}/include>")
+    # 32-bit pixels are host-order words: kernels that addressed their bytes
+    # (24-bit conversions, colour quantizers, bump maps) read and write words.
+    ballance_wii_patch(VxMathEndian
+            ROOT "${PROJECT_SOURCE_DIR}/Source/VxMath"
+            PATCH "${BALLANCE_WII_PATCH_DIR}/VxMath/big-endian.patch"
+            FILES src/VxBlitKernels.cpp src/VxBlitEngineClass.cpp src/VxImageKernels.cpp
+            TARGETS VxMath
+    )
 endfunction()
 
 # CK2: big-endian state chunks and files, and Wii storage paths ("sd:/").

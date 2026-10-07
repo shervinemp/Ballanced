@@ -1,5 +1,7 @@
-// Media readers: little-endian image and sound files must decode to host-order
-// ARGB pixel words and host-order samples.
+// Media readers and writers: little-endian image and sound files must decode
+// to host-order ARGB pixel words and host-order samples, images must save back
+// to little-endian files, and VxMath's pixel conversions must agree with that
+// layout.
 
 #include "TestFramework.h"
 
@@ -33,6 +35,9 @@ namespace
                 U8(text[i]);
         }
     };
+
+    CKDWORD LE16(const CKBYTE *bytes) { return (CKDWORD)(bytes[0] | (bytes[1] << 8)); }
+    CKDWORD LE32(const CKBYTE *bytes) { return LE16(bytes) | (LE16(bytes + 2) << 16); }
 
     CKDWORD Pixel(const CKBitmapProperties *props, int x, int y)
     {
@@ -172,6 +177,127 @@ namespace
         WT_CHECK(Pixel(props, 1, 0) == 0xFFFF0000, "tga second pixel %08X", Pixel(props, 1, 0));
     }
 
+    // An image of host-order ARGB words.
+    void Describe32(VxImageDescEx &f, int width, int height, CKDWORD *pixels)
+    {
+        f.Width = width;
+        f.Height = height;
+        f.BitsPerPixel = 32;
+        f.BytesPerLine = width * 4;
+        f.AlphaMask = 0xFF000000;
+        f.RedMask = 0x00FF0000;
+        f.GreenMask = 0x0000FF00;
+        f.BlueMask = 0x000000FF;
+        f.Image = (XBYTE *)pixels;
+    }
+
+    // Saves opaque red and half-transparent blue as a 24-bit file of headerSize
+    // header bytes, checks the header fields and B, G, R pixel bytes, and
+    // reads the file back.
+    void TestSave(const char *extension, int headerSize, int widthOffset, int heightOffset, int fieldSize)
+    {
+        CKDWORD pixels[2] = {0xFFFF0000, 0x800000FF};
+        CKBitmapProperties props;
+        Describe32(props.m_Format, 2, 1, pixels);
+        CKFileExtension ext((CKSTRING)extension);
+        Image saver;
+        saver.Reader = CKGetPluginManager()->GetBitmapReader(ext);
+        if (!WT_CHECK(saver.Reader != NULL, "%s writer", extension))
+            return;
+        void *memory = NULL;
+        const int size = saver.Reader->SaveMemory(&memory, &props);
+        const CKBYTE *bytes = (const CKBYTE *)memory;
+        if (WT_CHECK(bytes && size >= headerSize + 6, "%s saved %d bytes", extension, size))
+        {
+            const CKDWORD width = fieldSize == 2 ? LE16(bytes + widthOffset) : LE32(bytes + widthOffset);
+            const CKDWORD height = fieldSize == 2 ? LE16(bytes + heightOffset) : LE32(bytes + heightOffset);
+            WT_CHECK(width == 2 && height == 1, "%s header size %ux%u", extension, width, height);
+            static const CKBYTE expected[6] = {0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00};
+            const CKBYTE *p = bytes + headerSize;
+            WT_CHECK(memcmp(p, expected, sizeof(expected)) == 0, "%s pixels %02X %02X %02X %02X %02X %02X", extension,
+                     p[0], p[1], p[2], p[3], p[4], p[5]);
+
+            Image image;
+            image.Reader = CKGetPluginManager()->GetBitmapReader(ext);
+            if (image.Reader && image.Reader->ReadMemory(memory, size, &image.Props) == 0 && image.Props)
+                WT_CHECK(Pixel(image.Props, 0, 0) == 0xFFFF0000 && Pixel(image.Props, 1, 0) == 0xFF0000FF,
+                         "%s reads back %08X %08X", extension, Pixel(image.Props, 0, 0), Pixel(image.Props, 1, 0));
+            else
+                WT_CHECK(false, "%s reads back", extension);
+        }
+        if (memory)
+            saver.Reader->ReleaseMemory(memory);
+    }
+
+    // 24-bit pixels are blue, green, red bytes whatever the host byte order.
+    void TestBlit24()
+    {
+        CKDWORD argb[2] = {0xFF112233, 0x80445566};
+        VxImageDescEx src;
+        Describe32(src, 2, 1, argb);
+        CKBYTE rgb[8] = {0};
+        VxImageDescEx mid;
+        mid.Width = 2;
+        mid.Height = 1;
+        mid.BitsPerPixel = 24;
+        mid.BytesPerLine = 6;
+        mid.RedMask = 0x00FF0000;
+        mid.GreenMask = 0x0000FF00;
+        mid.BlueMask = 0x000000FF;
+        mid.Image = rgb;
+        VxDoBlit(src, mid);
+        static const CKBYTE expected[6] = {0x33, 0x22, 0x11, 0x66, 0x55, 0x44};
+        WT_CHECK(memcmp(rgb, expected, sizeof(expected)) == 0, "32 to 24-bit blit %02X %02X %02X", rgb[0], rgb[1],
+                 rgb[2]);
+        CKDWORD back[2] = {0, 0};
+        VxImageDescEx dst;
+        Describe32(dst, 2, 1, back);
+        VxDoBlit(mid, dst);
+        WT_CHECK(back[0] == 0xFF112233 && back[1] == 0xFF445566, "24 to 32-bit blit %08X %08X", back[0], back[1]);
+    }
+
+    // Quantizing to a palette must see red as red: left half red, right half blue.
+    void TestQuantize()
+    {
+        static CKDWORD argb[16 * 16];
+        for (int i = 0; i < 16 * 16; ++i)
+            argb[i] = (i % 16) < 8 ? 0xFFFF0000 : 0xFF0000FF;
+        VxImageDescEx src;
+        Describe32(src, 16, 16, argb);
+        static CKBYTE indices[16 * 16];
+        static CKBYTE palette[256 * 4];
+        VxImageDescEx dst;
+        dst.Width = 16;
+        dst.Height = 16;
+        dst.BitsPerPixel = 8;
+        dst.BytesPerLine = 16;
+        dst.ColorMapEntries = 256;
+        dst.BytesPerColorEntry = 4;
+        dst.ColorMap = palette;
+        dst.Image = indices;
+        VxDoBlit(src, dst);
+        // Palette entries are blue, green, red(, alpha) bytes.
+        const CKBYTE *red = palette + indices[0] * 4;
+        const CKBYTE *blue = palette + indices[15] * 4;
+        WT_CHECK(red[2] > red[1] + 100 && red[2] > red[0] + 100, "quantized red %02X %02X %02X", red[2], red[1],
+                 red[0]);
+        WT_CHECK(blue[0] > blue[1] + 100 && blue[0] > blue[2] + 100, "quantized blue %02X %02X %02X", blue[2],
+                 blue[1], blue[0]);
+    }
+
+    // A flat 32-bit image becomes a bump map without slopes: each pixel is
+    // the word 63 (luminance above the threshold, zero deltas).
+    void TestBumpMap()
+    {
+        CKDWORD pixels[16];
+        for (int i = 0; i < 16; ++i)
+            pixels[i] = 0xFF808080;
+        VxImageDescEx image;
+        Describe32(image, 4, 4, pixels);
+        WT_CHECK(VxConvertToBumpMap(image), "bump map converted");
+        WT_CHECK(pixels[0] == 63 && pixels[5] == 63, "bump pixels %08X %08X", pixels[0], pixels[5]);
+    }
+
     void TestWav()
     {
         // Mono, 16 bits, 22050 Hz: samples 0x1234 and -2.
@@ -224,6 +350,11 @@ void RunReaderTests()
     TestBmp();
     TestBmp16();
     TestTga();
+    TestSave("bmp", 54, 18, 22, 4);
+    TestSave("tga", 18, 12, 14, 2);
+    TestBlit24();
+    TestQuantize();
+    TestBumpMap();
     TestWav();
     wiitest::EndSuite();
 }

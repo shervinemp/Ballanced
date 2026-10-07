@@ -1,0 +1,172 @@
+diff --git a/src/VxBlitEngineClass.cpp b/src/VxBlitEngineClass.cpp
+index 3d942c5..b7c347b 100644
+--- a/src/VxBlitEngineClass.cpp
++++ b/src/VxBlitEngineClass.cpp
+@@ -1839,10 +1839,11 @@ XBOOL VxBlitEngine::QuantizeImage(const VxImageDescEx &src_desc, const VxImageDe
+     for (int y = 0; y < src_desc.Height; ++y) {
+         const XBYTE *src = srcRow;
+         for (int x = 0; x < src_desc.Width; ++x) {
+-            // Source is BGR(A), NeuQuant expects RGB
+-            rgbPtr[0] = src[2]; // R
+-            rgbPtr[1] = src[1]; // G
+-            rgbPtr[2] = src[0]; // B
++            // Source is a B, G, R pixel or an ARGB word, NeuQuant expects RGB
++            const XDWORD pixel = ReadPixel(src, srcBpp);
++            rgbPtr[0] = (XBYTE)(pixel >> 16); // R
++            rgbPtr[1] = (XBYTE)(pixel >> 8);  // G
++            rgbPtr[2] = (XBYTE)pixel;         // B
+             rgbPtr += 3;
+             src += srcBpp;
+         }
+@@ -1886,10 +1887,11 @@ XBOOL VxBlitEngine::QuantizeImage(const VxImageDescEx &src_desc, const VxImageDe
+         XBYTE *dst = dstRow;
+ 
+         for (int x = 0; x < src_desc.Width; ++x) {
+-            // Source is BGR(A)
+-            int b = src[0];
+-            int g = src[1];
+-            int r = src[2];
++            // Source is a B, G, R pixel or an ARGB word
++            const XDWORD pixel = ReadPixel(src, srcBpp);
++            int b = pixel & 0xFF;
++            int g = (pixel >> 8) & 0xFF;
++            int r = (pixel >> 16) & 0xFF;
+ 
+             // Find best matching palette index
+             int idx = nq.inxsearch(r, g, b);
+@@ -1951,9 +1953,10 @@ XBOOL VxBlitEngine::QuantizeImageMedianCut(const VxImageDescEx &src_desc, const
+     for (int y = 0; y < src_desc.Height; ++y) {
+         const XBYTE *src = srcRow;
+         for (int x = 0; x < src_desc.Width; ++x) {
+-            XBYTE b = src[0];
+-            XBYTE g = src[1];
+-            XBYTE r = src[2];
++            const XDWORD pixel = ReadPixel(src, srcBpp);
++            XBYTE b = (XBYTE)pixel;
++            XBYTE g = (XBYTE)(pixel >> 8);
++            XBYTE r = (XBYTE)(pixel >> 16);
+ 
+             // Create color key (5-6-5 quantized for hash)
+             XDWORD colorKey = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+@@ -2137,9 +2140,10 @@ XBOOL VxBlitEngine::QuantizeImageMedianCut(const VxImageDescEx &src_desc, const
+         XBYTE *dst = dstRow;
+ 
+         for (int x = 0; x < src_desc.Width; ++x) {
+-            XBYTE b = src[0];
+-            XBYTE g = src[1];
+-            XBYTE r = src[2];
++            const XDWORD pixel = ReadPixel(src, srcBpp);
++            XBYTE b = (XBYTE)pixel;
++            XBYTE g = (XBYTE)(pixel >> 8);
++            XBYTE r = (XBYTE)(pixel >> 16);
+ 
+             // Find closest palette entry
+             int bestIdx = 0;
+diff --git a/src/VxBlitKernels.cpp b/src/VxBlitKernels.cpp
+index dd82eb1..cd1f715 100644
+--- a/src/VxBlitKernels.cpp
++++ b/src/VxBlitKernels.cpp
+@@ -169,15 +169,16 @@ void CopyLine_32RGB_32ARGB_Scalar(const VxBlitInfo *info, int startX) {
+ // --- 32-bit ARGB -> 24-bit RGB -----------------------------------------------
+ 
+ void CopyLine_32ARGB_24RGB(const VxBlitInfo *info) {
+-    const XBYTE *src = info->srcLine;
++    const XDWORD *src = (const XDWORD *)info->srcLine;
+     XBYTE *dst = info->dstLine;
+     const int width = info->width;
+ 
++    // 32-bit pixels are host-order words; 24-bit pixels are B, G, R bytes.
+     for (int x = 0; x < width; ++x) {
+-        dst[0] = src[0]; // B
+-        dst[1] = src[1]; // G
+-        dst[2] = src[2]; // R
+-        src += 4;
++        const XDWORD pixel = src[x];
++        dst[0] = (XBYTE)pixel;         // B
++        dst[1] = (XBYTE)(pixel >> 8);  // G
++        dst[2] = (XBYTE)(pixel >> 16); // R
+         dst += 3;
+     }
+ }
+@@ -191,9 +192,10 @@ void CopyLine_32ARGB_24RGB_Scalar(const VxBlitInfo *info, int startX,
+     if (!src)
+         src = info->srcLine + startX * 4;
+     for (int x = startX; x < width; ++x) {
+-        dst[0] = src[0]; // B
+-        dst[1] = src[1]; // G
+-        dst[2] = src[2]; // R
++        const XDWORD pixel = *(const XDWORD *)src;
++        dst[0] = (XBYTE)pixel;         // B
++        dst[1] = (XBYTE)(pixel >> 8);  // G
++        dst[2] = (XBYTE)(pixel >> 16); // R
+         src += 4;
+         dst += 3;
+     }
+@@ -203,16 +205,13 @@ void CopyLine_32ARGB_24RGB_Scalar(const VxBlitInfo *info, int startX,
+ 
+ void CopyLine_24RGB_32ARGB(const VxBlitInfo *info) {
+     const XBYTE *src = info->srcLine;
+-    XBYTE *dst = info->dstLine;
++    XDWORD *dst = (XDWORD *)info->dstLine;
+     const int width = info->width;
+ 
++    // 24-bit pixels are B, G, R bytes; 32-bit pixels are host-order words.
+     for (int x = 0; x < width; ++x) {
+-        dst[0] = src[0]; // B
+-        dst[1] = src[1]; // G
+-        dst[2] = src[2]; // R
+-        dst[3] = 0xFF;   // A
++        dst[x] = src[0] | ((XDWORD)src[1] << 8) | ((XDWORD)src[2] << 16) | 0xFF000000;
+         src += 3;
+-        dst += 4;
+     }
+ }
+ 
+diff --git a/src/VxImageKernels.cpp b/src/VxImageKernels.cpp
+index 3b13f22..bab2d1d 100644
+--- a/src/VxImageKernels.cpp
++++ b/src/VxImageKernels.cpp
+@@ -805,6 +805,11 @@ static void WriteBumpMap24Row(
+     dst[2] = (XBYTE) (currentLum[width - 2] - currentLum[0]);
+ }
+ 
++// A 32-bit bump pixel is a host-order word holding three bytes, lowest first.
++static void WriteBumpPixel32(XBYTE *dst, int low, int middle, int high) {
++    *(XDWORD *) dst = (XDWORD) (XBYTE) low | ((XDWORD) (XBYTE) middle << 8) | ((XDWORD) (XBYTE) high << 16);
++}
++
+ static void WriteBumpMap32Row(
+     XBYTE *dstRow,
+     int width,
+@@ -812,24 +817,17 @@ static void WriteBumpMap32Row(
+     const int *currentLum,
+     const int *belowLum
+ ) {
+-    dstRow[0] = (XBYTE) ((currentLum[0] <= 1) ? 127 : 63);
+-    dstRow[1] = (XBYTE) (aboveLum[0] - belowLum[0] + currentLum[width - 1] - belowLum[1]);
+-    dstRow[2] = (XBYTE) (currentLum[width - 1] - currentLum[0]);
+-    dstRow[3] = 0;
++    WriteBumpPixel32(dstRow, (currentLum[0] <= 1) ? 127 : 63,
++                     aboveLum[0] - belowLum[0] + currentLum[width - 1] - belowLum[1],
++                     currentLum[width - 1] - currentLum[0]);
+ 
+     for (int x = 1; x < width - 1; ++x) {
+-        XBYTE *dst = dstRow + x * 4;
+-        dst[0] = (XBYTE) ((currentLum[x] <= 1) ? 127 : 63);
+-        dst[1] = (XBYTE) (aboveLum[x] - belowLum[x]);
+-        dst[2] = (XBYTE) (currentLum[x - 1] - currentLum[x + 1]);
+-        dst[3] = 0;
++        WriteBumpPixel32(dstRow + x * 4, (currentLum[x] <= 1) ? 127 : 63, aboveLum[x] - belowLum[x],
++                         currentLum[x - 1] - currentLum[x + 1]);
+     }
+ 
+-    XBYTE *dst = dstRow + (width - 1) * 4;
+-    dst[0] = (XBYTE) ((currentLum[width - 1] <= 1) ? 127 : 63);
+-    dst[1] = (XBYTE) (aboveLum[width - 1] - belowLum[width - 1]);
+-    dst[2] = (XBYTE) (currentLum[width - 2] - currentLum[0]);
+-    dst[3] = 0;
++    WriteBumpPixel32(dstRow + (width - 1) * 4, (currentLum[width - 1] <= 1) ? 127 : 63,
++                     aboveLum[width - 1] - belowLum[width - 1], currentLum[width - 2] - currentLum[0]);
+ }
+ 
+ 
