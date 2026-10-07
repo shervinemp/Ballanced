@@ -7,6 +7,23 @@
 #include "WiiGamePlayer.h"
 #include "WiiSystem.h"
 
+namespace
+{
+    // Ballance's language for the console's: 0 German, 1 English, 2 Spanish,
+    // 3 Italian, 4 French. Other languages get English.
+    int ConsoleLanguage()
+    {
+        switch (CONF_GetLanguage())
+        {
+        case CONF_LANG_GERMAN: return 0;
+        case CONF_LANG_SPANISH: return 2;
+        case CONF_LANG_ITALIAN: return 3;
+        case CONF_LANG_FRENCH: return 4;
+        default: return 1;
+        }
+    }
+}
+
 int main(int argc, char **argv)
 {
     const bool storage = wiisystem::Init(argc, argv);
@@ -23,6 +40,8 @@ int main(int argc, char **argv)
 
     CGameConfig config;
     config.SetRuntimeBasePath(gamePath);
+    // Player.ini can still choose another language.
+    config.langId = ConsoleLanguage();
     config.LoadFromIni();
     // The TV picture has one mode; desktop window settings do not apply.
     config.driver = 0;
