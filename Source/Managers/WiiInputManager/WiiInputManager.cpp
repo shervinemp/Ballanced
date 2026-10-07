@@ -657,9 +657,11 @@ void WiiInputManager::PollPointer()
             angle = data->ir.angle;
         }
     }
-    // The screen keyboard needs the pointer even when the game hides its cursor.
-    wiisystem::SetPointer((m_CursorVisible || m_TextInput) && m_PointerOnScreen, m_MousePosition.x, m_MousePosition.y,
-                          angle);
+    // The pointer shows where the game shows its cursor and uses the mouse
+    // buttons (the font manager reads the position every frame regardless),
+    // and always for the screen keyboard.
+    const CKBOOL visible = m_TextInput || (m_CursorVisible && MouseButtonsInUse());
+    wiisystem::SetPointer(visible && m_PointerOnScreen, m_MousePosition.x, m_MousePosition.y, angle);
 }
 
 // ---------------------------------------------------------------------------
