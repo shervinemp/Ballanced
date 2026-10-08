@@ -12,6 +12,8 @@
 #include <string.h>
 
 extern void CKGXRasterizerGetInfo(CKRasterizerInfo *info);
+extern CKBOOL CKGXPushGuardedState(CKRasterizerContext *context);
+extern CKBOOL CKGXPopGuardedState(CKRasterizerContext *context);
 
 namespace
 {
@@ -228,6 +230,131 @@ namespace
         DrawColored(ctx, VX_TRIANGLELIST, kCenterTriangle, colors, 3);
         EndFrame(ctx);
         EXPECT_PIXEL(ctx, 320, 240, 255, 0, 0, "flat shading takes the first vertex");
+    }
+
+    // Positions and colours into a vertex buffer of the canonical layout.
+    void WriteColoredVertices(CKBYTE *data, const CKRSTVertexLayout &layout, const VxVector *positions,
+                              const CKDWORD *colors, int count, float offsetX)
+    {
+        for (int i = 0; i < count; ++i)
+        {
+            CKBYTE *vertex = data + i * layout.Stride;
+            VxVector position = positions[i];
+            position.x += offsetX;
+            memcpy(vertex + layout.PositionOffset, &position, sizeof(position));
+            memcpy(vertex + layout.DiffuseOffset, &colors[i], sizeof(CKDWORD));
+        }
+    }
+
+    // Vertex buffers are drawn from GX arrays, which the GPU reads after the draw call.
+    void TestVertexBuffers(CKRasterizerContext *ctx)
+    {
+        CKRSTVertexLayout layout;
+        layout.Stride = CKRSTGetVertexLayout(CKRST_DP_TR_VC, NULL, &layout);
+        const CKDWORD colors[3] = {0xFFFF0000, 0xFF00FF00, 0xFF0000FF};
+        CKBYTE vertices[3 * 64];
+        WriteColoredVertices(vertices, layout, kCenterTriangle, colors, 3, 0.0f);
+
+        CKVertexBufferDesc vbDesc;
+        vbDesc.m_Flags = CKRST_VB_VALID;
+        vbDesc.m_VertexFormat = CKRST_DP_TR_VC;
+        vbDesc.m_MaxVertexCount = 3;
+        CKDWORD vb = 0;
+        WT_CHECK(ctx->CreateVertexBuffer(&vbDesc, vertices, &vb) && vb, "CreateVertexBuffer");
+        CKIndexBufferDesc ibDesc;
+        ibDesc.m_Flags = CKRST_VB_VALID;
+        ibDesc.m_MaxIndexCount = 3;
+        const CKWORD indices[3] = {0, 1, 2};
+        CKDWORD ib = 0;
+        WT_CHECK(ctx->CreateIndexBuffer(&ibDesc, indices, &ib) && ib, "CreateIndexBuffer");
+
+        SetDiffuseState(ctx);
+        BeginFrame(ctx, 0xFF000000);
+        WT_CHECK(ctx->DrawPrimitiveVBIB(VX_TRIANGLELIST, vb, ib, 0, 3, 0, 3), "DrawPrimitiveVBIB");
+        EndFrame(ctx);
+        EXPECT_PIXEL(ctx, 60, 430, 255, 0, 0, "vertex buffer colour near the red corner");
+        EXPECT_PIXEL(ctx, 580, 430, 0, 255, 0, "vertex buffer colour near the green corner");
+        EXPECT_PIXEL(ctx, 320, 40, 0, 0, 255, "vertex buffer colour near the blue corner");
+
+        ctx->SetRenderState(VXRENDERSTATE_SHADEMODE, VXSHADE_FLAT);
+        BeginFrame(ctx, 0xFF000000);
+        CKWORD flatIndices[3] = {0, 1, 2};
+        WT_CHECK(ctx->DrawPrimitiveVB(VX_TRIANGLELIST, vb, 0, 3, flatIndices, 3), "DrawPrimitiveVB");
+        EndFrame(ctx);
+        EXPECT_PIXEL(ctx, 320, 240, 255, 0, 0, "flat shading from a vertex buffer");
+        ctx->SetRenderState(VXRENDERSTATE_SHADEMODE, VXSHADE_GOURAUD);
+
+        // Rewriting a buffer after drawing it leaves the earlier draw alone.
+        const VxVector small[3] = {VxVector(-0.3f, -0.3f, 0.5f), VxVector(0.3f, -0.3f, 0.5f), VxVector(0.0f, 0.3f, 0.5f)};
+        const CKDWORD red[3] = {0xFFFF0000, 0xFFFF0000, 0xFFFF0000};
+        const CKDWORD green[3] = {0xFF00FF00, 0xFF00FF00, 0xFF00FF00};
+        BeginFrame(ctx, 0xFF000000);
+        CKBYTE *locked = (CKBYTE *)ctx->LockVertexBuffer(vb, 0, 3, CKRST_LOCK_DISCARD);
+        WT_CHECK(locked != NULL, "LockVertexBuffer");
+        if (locked)
+        {
+            WriteColoredVertices(locked, layout, small, red, 3, -0.5f);
+            ctx->UnlockVertexBuffer(vb);
+        }
+        ctx->DrawPrimitiveVBIB(VX_TRIANGLELIST, vb, ib, 0, 3, 0, 3);
+        locked = (CKBYTE *)ctx->LockVertexBuffer(vb, 0, 3, CKRST_LOCK_DISCARD);
+        WT_CHECK(locked != NULL, "LockVertexBuffer again in the frame");
+        if (locked)
+        {
+            WriteColoredVertices(locked, layout, small, green, 3, 0.5f);
+            ctx->UnlockVertexBuffer(vb);
+        }
+        ctx->DrawPrimitiveVBIB(VX_TRIANGLELIST, vb, ib, 0, 3, 0, 3);
+        // Deleted while queued: freed once the frame is drawn.
+        ctx->DeleteObject(vb, CKRST_OBJ_VERTEXBUFFER);
+        EndFrame(ctx);
+        EXPECT_PIXEL(ctx, 160, 240, 255, 0, 0, "first draw keeps the buffer's earlier contents");
+        EXPECT_PIXEL(ctx, 480, 240, 0, 255, 0, "second draw sees the new contents");
+        EXPECT_PIXEL(ctx, 320, 240, 0, 0, 0, "nothing between the two");
+        ctx->DeleteObject(ib, CKRST_OBJ_INDEXBUFFER);
+    }
+
+    // The copy CKRenderContextStateGuard takes on the Wii.
+    void TestGuardedState(CKRasterizerContext *ctx)
+    {
+        SetDiffuseState(ctx);
+        const CKDWORD texture = CreateTexture(ctx, _32_ARGB8888, 4, 4, NULL);
+        ctx->SetTexture(texture, 0);
+        ctx->SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, TRUE);
+        VxMatrix world;
+        Vx3DMatrixIdentity(world);
+        world[3][0] = 2.0f;
+        ctx->SetTransformMatrix(VXMATRIX_WORLD, world);
+
+        WT_CHECK(CKGXPushGuardedState(ctx), "push the guarded state");
+        ctx->SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
+        ctx->SetTextureStageState(0, CKRST_TSS_TEXTUREMAPBLEND, VXTEXTUREBLEND_ADD);
+        ctx->SetTexture(0, 0);
+        VxMatrix identity;
+        Vx3DMatrixIdentity(identity);
+        ctx->SetTransformMatrix(VXMATRIX_WORLD, identity);
+        ctx->ResetTextureStages(0, CKRST_MAX_TEXTURE_STAGES);
+        WT_CHECK(CKGXPopGuardedState(ctx), "pop the guarded state");
+
+        CKDWORD value = 0;
+        ctx->GetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, &value);
+        WT_CHECK(value == TRUE, "render state restored");
+        ctx->GetTextureStageState(0, CKRST_TSS_OP, &value);
+        WT_CHECK(value == CKRST_TOP_SELECTARG1, "stage state restored: %u", (unsigned)value);
+        ctx->GetTextureStageState(0, CKRST_TSS_TEXTUREMAPBLEND, &value);
+        WT_CHECK(value == 0, "texture blend restored: %u", (unsigned)value);
+        ctx->GetTexture(0, &value);
+        WT_CHECK(value == texture, "texture restored");
+        VxMatrix restored;
+        ctx->GetTransformMatrix(VXMATRIX_WORLD, restored);
+        WT_CHECK(restored[3][0] == 2.0f, "world matrix restored");
+
+        // A texture deleted while guarded comes back unbound.
+        CKGXPushGuardedState(ctx);
+        ctx->DeleteObject(texture, CKRST_OBJ_TEXTURE);
+        CKGXPopGuardedState(ctx);
+        ctx->GetTexture(0, &value);
+        WT_CHECK(value == 0, "deleted texture stays unbound");
     }
 
     void TestCulling(CKRasterizerContext *ctx)
@@ -676,6 +803,8 @@ void RunRasterizerTests()
 
     TestClearAndOrientation(ctx);
     TestShading(ctx);
+    TestVertexBuffers(ctx);
+    TestGuardedState(ctx);
     TestCulling(ctx);
     TestDepth(ctx);
     TestBlending(ctx);

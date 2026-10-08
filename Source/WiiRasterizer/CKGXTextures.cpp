@@ -192,11 +192,7 @@ void CKGXRasterizerContext::WaitForTextureUse(CKGXTexture &texture)
     if (texture.UsedThisFrame)
     {
         GX_DrawDone();
-        for (int i = 0; i < m_Resources.Size(); ++i)
-        {
-            if (m_Resources[i] && m_Resources[i]->Type == CKRST_OBJ_TEXTURE)
-                m_Resources[i]->Texture.UsedThisFrame = FALSE;
-        }
+        GpuIdle();
     }
 }
 

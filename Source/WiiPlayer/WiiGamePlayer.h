@@ -30,6 +30,7 @@ private:
     bool Update();
     void OpenHomeMenu();
     void LogPerformance();
+    void StartReport(unsigned long long now);
 
     void DrainPlayerCommands();
     int ExecutePlayerCommand(const TTPlayerCommand &command);
@@ -41,6 +42,11 @@ private:
     unsigned int m_FrameCount;
     unsigned int m_ReportFrame;
     unsigned long long m_LastReport; // Time base ticks
+    // Since the last report
+    unsigned long long m_ProcessTicks;
+    unsigned long long m_RenderTicks;
+    unsigned int m_Objects;
+    unsigned int m_Triangles;
 
     CKContext *m_CKContext;
     CKRenderContext *m_RenderContext;

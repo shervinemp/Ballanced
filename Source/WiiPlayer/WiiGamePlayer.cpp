@@ -150,6 +150,10 @@ WiiGamePlayer::WiiGamePlayer()
       m_FrameCount(0),
       m_ReportFrame(0),
       m_LastReport(0),
+      m_ProcessTicks(0),
+      m_RenderTicks(0),
+      m_Objects(0),
+      m_Triangles(0),
       m_CKContext(NULL),
       m_RenderContext(NULL),
       m_RenderManager(NULL),
@@ -345,9 +349,7 @@ bool WiiGamePlayer::Load(const char *filename)
         return false;
 
     LogMemory("after loading");
-    wiisystem::TakeFrameWaits(NULL, NULL);
-    m_LastReport = gettime();
-    m_ReportFrame = m_FrameCount;
+    StartReport(gettime());
     m_CKContext->Play();
     return true;
 }
@@ -424,8 +426,16 @@ bool WiiGamePlayer::Update()
     // game. Following the time manager's frame rate limit as well (60 Hz in
     // Ballance) would beat against the TV's 59.94 or 50 Hz and drop frames.
     m_TimeManager->ResetChronos(TRUE, TRUE);
+    const u64 start = gettime();
     m_CKContext->Process();
+    const u64 processed = gettime();
     m_RenderContext->Render();
+    m_ProcessTicks += processed - start;
+    m_RenderTicks += gettime() - processed;
+    VxStats stats;
+    m_RenderContext->GetStats(&stats);
+    m_Objects += stats.NbObjectDrawn;
+    m_Triangles += stats.NbTrianglesDrawn;
     // Levels load from scripts, so check the heap and the frame time now and then.
     if (++m_FrameCount - m_ReportFrame >= (m_Config.verbose ? 300u : 1800u))
         LogPerformance();
@@ -445,16 +455,29 @@ void WiiGamePlayer::LogPerformance()
         const float frame = elapsed / frames;
         const float gpuWait = ticks_to_microsecs(gpu) / 1000.0f / frames;
         const float tvWait = ticks_to_microsecs(vsync) / 1000.0f / frames;
-        CLogger::Get().Info("Frames: %.1f per second, %.1f ms each: %.1f ms busy, %.1f ms waiting for the GPU, "
-                            "%.1f ms for the TV",
-                            frames * 1000.0f / elapsed, frame, frame - gpuWait - tvWait, gpuWait, tvWait);
+        const float logic = ticks_to_microsecs(m_ProcessTicks) / 1000.0f / frames;
+        // Rendering waits for the GPU and the TV at the end of the frame.
+        const float drawing = ticks_to_microsecs(m_RenderTicks) / 1000.0f / frames - gpuWait - tvWait;
+        CLogger::Get().Info("Frames: %.1f per second, %.1f ms each: %.1f ms busy (%.1f game, %.1f drawing), "
+                            "%.1f ms waiting for the GPU, %.1f ms for the TV; %u objects, %u triangles",
+                            frames * 1000.0f / elapsed, frame, frame - gpuWait - tvWait, logic, drawing, gpuWait,
+                            tvWait, m_Objects / frames, m_Triangles / frames);
     }
-    m_LastReport = now;
-    m_ReportFrame = m_FrameCount;
+    StartReport(now);
     LogMemory("while playing");
 
     if (m_Config.verbose)
         LogRunningBlocks(m_CKContext);
+}
+
+// Starts a new report period; with no start time the next report is skipped.
+void WiiGamePlayer::StartReport(unsigned long long now)
+{
+    wiisystem::TakeFrameWaits(NULL, NULL);
+    m_LastReport = now;
+    m_ReportFrame = m_FrameCount;
+    m_ProcessTicks = m_RenderTicks = 0;
+    m_Objects = m_Triangles = 0;
 }
 
 void WiiGamePlayer::OpenHomeMenu()
@@ -465,9 +488,7 @@ void WiiGamePlayer::OpenHomeMenu()
     while (wiisystem::UpdateHomeMenu())
         m_RenderContext->Render();
     // Menu frames don't count towards the game's frame times.
-    wiisystem::TakeFrameWaits(NULL, NULL);
-    m_LastReport = 0;
-    m_ReportFrame = m_FrameCount;
+    StartReport(0);
     if (wiisystem::GetQuitRequest() == wiisystem::QUIT_NONE)
         m_CKContext->Play();
     else

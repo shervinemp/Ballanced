@@ -37,7 +37,9 @@ CKGXRasterizerContext::CKGXRasterizerContext(CKRasterizerDriver *driver)
       m_Target(0),
       m_TargetWidth(0),
       m_TargetHeight(0),
+      m_VertexCacheDirty(TRUE),
       m_LightsDirty(TRUE),
+      m_GuardDepth(0),
       m_FrameDrawCalls(0),
       m_FramePrimitives(0),
       m_FrameClears(0),
@@ -228,12 +230,10 @@ CKBOOL CKGXRasterizerContext::BeginShutdown()
         it->Callback(it->User, it->HasRect ? &it->Rect : NULL, it->Buffer, NULL, FALSE);
 
     GX_DrawDone();
+    GpuIdle();
     for (int i = 0; i < m_Resources.Size(); ++i)
         ReleaseResource(m_Resources[i]);
     m_Resources.Clear();
-    for (int i = 0; i < m_PendingFrees.Size(); ++i)
-        ReleaseResource(m_PendingFrees[i]);
-    m_PendingFrees.Clear();
     memset(m_Textures, 0, sizeof(m_Textures));
     m_Target = 0;
     m_Phase = PHASE_IDLE;
@@ -373,16 +373,7 @@ CKBOOL CKGXRasterizerContext::BackToFront(CKBOOL vsync)
     }
 
     CopyToScreen();
-
-    // The GPU is idle now: resources deleted during the frame can go.
-    for (int i = 0; i < m_PendingFrees.Size(); ++i)
-        ReleaseResource(m_PendingFrees[i]);
-    m_PendingFrees.Clear();
-    for (int i = 0; i < m_Resources.Size(); ++i)
-    {
-        if (m_Resources[i] && m_Resources[i]->Type == CKRST_OBJ_TEXTURE)
-            m_Resources[i]->Texture.UsedThisFrame = FALSE;
-    }
+    GpuIdle();
 
     m_Phase = PHASE_IDLE;
     m_FrameOpen = FALSE;
@@ -440,6 +431,7 @@ CKBOOL CKGXRasterizerContext::SetTextureStageState(int stage, CKRST_TEXTURESTAGE
 
     m_StageStates[stage][(CKDWORD)state] = value;
     m_StageSetMasks[stage] |= UINT64_C(1) << (CKDWORD)state;
+    m_ResetStages &= ~(1u << stage);
 
     if (state == CKRST_TSS_ADDRESS)
     {
@@ -546,6 +538,10 @@ CKBOOL CKGXRasterizerContext::ResetTextureStages(int firstStage, int stageCount)
     }
     for (int stage = firstStage; stage < firstStage + stageCount; ++stage)
     {
+        // The engine resets every stage from 0 or 1 several times a frame.
+        if (m_ResetStages & (1u << stage))
+            continue;
+        m_ResetStages |= 1u << stage;
         m_Textures[stage] = 0;
         memset(m_StageStates[stage], 0, sizeof(m_StageStates[stage]));
         m_StageStates[stage][CKRST_TSS_TEXCOORDINDEX] = (CKDWORD)stage;
@@ -576,6 +572,8 @@ CKBOOL CKGXRasterizerContext::SetTexture(CKDWORD texture, int stage)
         return FALSE;
     }
     m_Textures[stage] = texture;
+    if (texture)
+        m_ResetStages &= ~(1u << stage);
     return TRUE;
 }
 
@@ -603,6 +601,8 @@ CKBOOL CKGXRasterizerContext::SetTransformMatrix(VXMATRIX_TYPE type, const VxMat
     m_Matrices[slot] = matrix;
     if (type == VXMATRIX_VIEW)
         m_LightsDirty = TRUE; // Lights live in eye space.
+    else if ((CKDWORD)type >= (CKDWORD)VXMATRIX_TEXTURE0 && (CKDWORD)type < (CKDWORD)VXMATRIX_TEXTURE0 + CKRST_MAX_TEXTURE_STAGES)
+        m_ResetStages &= ~(1u << ((CKDWORD)type - (CKDWORD)VXMATRIX_TEXTURE0));
     return TRUE;
 }
 
@@ -707,6 +707,67 @@ CKBOOL CKGXRasterizerContext::GetUserClipPlane(CKDWORD index, VxPlane &plane)
     return TRUE;
 }
 
+CKBOOL CKGXPushGuardedState(CKRasterizerContext *context)
+{
+    CKGXRasterizerContext *gx = dynamic_cast<CKGXRasterizerContext *>(context);
+    if (!gx)
+        return FALSE;
+    gx->PushGuardedState();
+    return TRUE;
+}
+
+CKBOOL CKGXPopGuardedState(CKRasterizerContext *context)
+{
+    CKGXRasterizerContext *gx = dynamic_cast<CKGXRasterizerContext *>(context);
+    if (!gx)
+        return FALSE;
+    gx->PopGuardedState();
+    return TRUE;
+}
+
+void CKGXRasterizerContext::PushGuardedState()
+{
+    if (m_GuardDepth == m_GuardedStates.Size())
+        m_GuardedStates.Resize(m_GuardDepth + 1);
+    GuardedState &state = m_GuardedStates[m_GuardDepth++];
+    memcpy(state.RenderStates, m_RenderStates, sizeof(state.RenderStates));
+    memcpy(state.StageStates, m_StageStates, sizeof(state.StageStates));
+    memcpy(state.StageSetMasks, m_StageSetMasks, sizeof(state.StageSetMasks));
+    state.ResetStages = m_ResetStages;
+    memcpy(state.Textures, m_Textures, sizeof(state.Textures));
+    for (int stage = 0; stage < CKRST_MAX_TEXTURE_STAGES; ++stage)
+        state.TextureMatrices[stage] = m_Matrices[CKRSTMatrixSlot(VXMATRIX_TEXTURE(stage))];
+    state.World = m_Matrices[CKRSTMatrixSlot(VXMATRIX_WORLD)];
+    state.View = m_Matrices[CKRSTMatrixSlot(VXMATRIX_VIEW)];
+    state.Projection = m_Matrices[CKRSTMatrixSlot(VXMATRIX_PROJECTION)];
+}
+
+void CKGXRasterizerContext::PopGuardedState()
+{
+    if (m_GuardDepth == 0)
+        return;
+    const GuardedState &state = m_GuardedStates[--m_GuardDepth];
+    memcpy(m_RenderStates, state.RenderStates, sizeof(m_RenderStates));
+    memcpy(m_StageStates, state.StageStates, sizeof(m_StageStates));
+    memcpy(m_StageSetMasks, state.StageSetMasks, sizeof(m_StageSetMasks));
+    m_ResetStages = state.ResetStages;
+    for (int stage = 0; stage < CKRST_MAX_TEXTURE_STAGES; ++stage)
+    {
+        // A texture deleted meanwhile stays unbound.
+        const CKDWORD texture = state.Textures[stage];
+        m_Textures[stage] = texture && Find(CKRST_OBJ_TEXTURE, texture) ? texture : 0;
+        m_Matrices[CKRSTMatrixSlot(VXMATRIX_TEXTURE(stage))] = state.TextureMatrices[stage];
+    }
+    m_Matrices[CKRSTMatrixSlot(VXMATRIX_WORLD)] = state.World;
+    VxMatrix &view = m_Matrices[CKRSTMatrixSlot(VXMATRIX_VIEW)];
+    if (memcmp(&view, &state.View, sizeof(view)) != 0)
+    {
+        view = state.View;
+        m_LightsDirty = TRUE; // Lights live in eye space.
+    }
+    m_Matrices[CKRSTMatrixSlot(VXMATRIX_PROJECTION)] = state.Projection;
+}
+
 void CKGXRasterizerContext::InitDefaultRenderStatesValue()
 {
     for (CKDWORD state = 0; state < (CKDWORD)VXRENDERSTATE_MAXSTATE; ++state)
@@ -714,6 +775,7 @@ void CKGXRasterizerContext::InitDefaultRenderStatesValue()
     memset(m_StageStates, 0, sizeof(m_StageStates));
     memset(m_StageSetMasks, 0, sizeof(m_StageSetMasks));
     memset(m_Textures, 0, sizeof(m_Textures));
+    m_ResetStages = 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -793,8 +855,7 @@ CKBOOL CKGXRasterizerContext::DrawPrimitiveVB(VXPRIMITIVETYPE type, CKDWORD vb, 
     }
 
     VertexSource source;
-    BuildVertexSource(desc.m_VertexFormat, resource->Buffer.Data + (size_t)startVertex * desc.m_VertexSize,
-                      desc.m_VertexSize, desc.m_TexcoordDims, source);
+    BuildVertexSource(resource->Buffer, startVertex, source);
     return Submit(type, source, vertexCount, indices, indexCount, 0);
 }
 
@@ -822,7 +883,7 @@ CKBOOL CKGXRasterizerContext::DrawPrimitiveVBIB(VXPRIMITIVETYPE type, CKDWORD vb
 
     // Indices address the whole vertex buffer.
     VertexSource source;
-    BuildVertexSource(desc.m_VertexFormat, vertices->Buffer.Data, desc.m_VertexSize, desc.m_TexcoordDims, source);
+    BuildVertexSource(vertices->Buffer, 0, source);
     const CKWORD *indices = (const CKWORD *)indexBuffer->Buffer.Data + startIndex;
     return Submit(type, source, desc.m_MaxVertexCount, indices, indexCount, 0);
 }
@@ -859,10 +920,61 @@ void CKGXRasterizerContext::ReleaseResource(CKGXResource *resource)
     if (!resource)
         return;
     if (resource->Type == CKRST_OBJ_TEXTURE)
+    {
         free(resource->Texture.Data);
+    }
     else
+    {
         free(resource->Buffer.Data);
+        free(resource->Buffer.Colors);
+    }
     delete resource;
+}
+
+// Makes vertices written by the CPU visible to the GPU: colours converted to
+// GX order, the range stored from the data cache, cached array data dropped.
+void CKGXRasterizerContext::StoreVertices(CKGXBuffer &buffer, CKDWORD offset, CKDWORD size)
+{
+    const CKDWORD stride = buffer.VertexDesc.m_VertexSize;
+    if (size == 0 || stride == 0)
+        return;
+    if (buffer.Colors)
+    {
+        CKRSTVertexLayout layout;
+        CKRSTGetVertexLayout(buffer.VertexDesc.m_VertexFormat, buffer.VertexDesc.m_TexcoordDims, &layout);
+        const CKDWORD first = offset / stride;
+        const CKDWORD end = (offset + size + stride - 1) / stride;
+        const CKBYTE *argb = buffer.Data + (size_t)first * stride + layout.DiffuseOffset;
+        for (CKDWORD i = first; i < end; ++i, argb += stride)
+        {
+            const u32 color = *(const u32 *)argb;
+            buffer.Colors[i] = (color << 8) | (color >> 24);
+        }
+        DCStoreRange(buffer.Colors + first, (end - first) * sizeof(u32));
+    }
+    DCStoreRange(buffer.Data + offset, size);
+    m_VertexCacheDirty = TRUE;
+}
+
+// After GX_DrawDone: nothing queued reads a resource any more.
+void CKGXRasterizerContext::GpuIdle()
+{
+    for (int i = 0; i < m_PendingFrees.Size(); ++i)
+        ReleaseResource(m_PendingFrees[i]);
+    m_PendingFrees.Clear();
+    for (int i = 0; i < m_PendingBufferFrees.Size(); ++i)
+        free(m_PendingBufferFrees[i]);
+    m_PendingBufferFrees.Clear();
+    for (int i = 0; i < m_Resources.Size(); ++i)
+    {
+        CKGXResource *resource = m_Resources[i];
+        if (!resource)
+            continue;
+        if (resource->Type == CKRST_OBJ_TEXTURE)
+            resource->Texture.UsedThisFrame = FALSE;
+        else
+            resource->Buffer.UsedThisFrame = FALSE;
+    }
 }
 
 CKBOOL CKGXRasterizerContext::GetTextureDesc(CKDWORD texture, CKTextureDesc *desc) const
@@ -883,7 +995,8 @@ CKBOOL CKGXRasterizerContext::CreateVertexBuffer(const CKVertexBufferDesc *desc,
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
     }
-    const CKDWORD stride = CKRSTGetVertexLayout(desc->m_VertexFormat, desc->m_TexcoordDims, NULL);
+    CKRSTVertexLayout layout;
+    const CKDWORD stride = CKRSTGetVertexLayout(desc->m_VertexFormat, desc->m_TexcoordDims, &layout);
     if (!stride || (desc->m_VertexSize && desc->m_VertexSize != stride) || desc->m_MaxVertexCount > 0x7FFFFFFF / stride)
     {
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
@@ -893,24 +1006,28 @@ CKBOOL CKGXRasterizerContext::CreateVertexBuffer(const CKVertexBufferDesc *desc,
     CKGXResource *resource = new CKGXResource();
     memset(resource, 0, sizeof(CKGXResource));
     resource->Type = CKRST_OBJ_VERTEXBUFFER;
-    resource->Buffer.VertexDesc = *desc;
-    resource->Buffer.VertexDesc.m_VertexSize = stride;
-    resource->Buffer.Size = desc->m_MaxVertexCount * stride;
-    resource->Buffer.Data = (CKBYTE *)memalign(32, resource->Buffer.Size);
-    if (!resource->Buffer.Data)
+    CKGXBuffer &buffer = resource->Buffer;
+    buffer.VertexDesc = *desc;
+    buffer.VertexDesc.m_VertexSize = stride;
+    buffer.Size = desc->m_MaxVertexCount * stride;
+    buffer.Data = (CKBYTE *)memalign(32, buffer.Size);
+    if (layout.DiffuseOffset >= 0)
+        buffer.Colors = (u32 *)memalign(32, desc->m_MaxVertexCount * sizeof(u32));
+    if (!buffer.Data || (layout.DiffuseOffset >= 0 && !buffer.Colors))
     {
-        delete resource;
+        ReleaseResource(resource);
         return FALSE;
     }
     if (data)
     {
-        memcpy(resource->Buffer.Data, data, resource->Buffer.Size);
+        memcpy(buffer.Data, data, buffer.Size);
         ++m_FrameBufferUploads;
     }
     else
     {
-        memset(resource->Buffer.Data, 0, resource->Buffer.Size);
+        memset(buffer.Data, 0, buffer.Size);
     }
+    StoreVertices(buffer, 0, buffer.Size);
     return Insert(resource, outHandle);
 }
 
@@ -982,9 +1099,38 @@ void *CKGXRasterizerContext::LockVertexBuffer(CKDWORD vb, CKDWORD startVertex, C
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return NULL;
     }
-    // Vertices are copied into the GPU FIFO at draw time, so the buffer is free to change.
-    resource->Buffer.Locked = TRUE;
-    return resource->Buffer.Data + (size_t)startVertex * resource->Buffer.VertexDesc.m_VertexSize;
+    CKGXBuffer &buffer = resource->Buffer;
+    if (buffer.UsedThisFrame)
+    {
+        // Draws still queued read the current contents: write into a copy and
+        // free the old one once the GPU is idle.
+        CKBYTE *data = (CKBYTE *)memalign(32, buffer.Size);
+        u32 *colors = buffer.Colors ? (u32 *)memalign(32, maximum * sizeof(u32)) : NULL;
+        if (!data || (buffer.Colors && !colors))
+        {
+            free(data);
+            free(colors);
+            Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
+            return NULL;
+        }
+        memcpy(data, buffer.Data, buffer.Size);
+        DCStoreRange(data, buffer.Size);
+        m_PendingBufferFrees.PushBack(buffer.Data);
+        buffer.Data = data;
+        if (colors)
+        {
+            memcpy(colors, buffer.Colors, maximum * sizeof(u32));
+            DCStoreRange(colors, maximum * sizeof(u32));
+            m_PendingBufferFrees.PushBack(buffer.Colors);
+            buffer.Colors = colors;
+        }
+        buffer.UsedThisFrame = FALSE;
+    }
+    const CKDWORD stride = buffer.VertexDesc.m_VertexSize;
+    buffer.Locked = TRUE;
+    buffer.LockOffset = startVertex * stride;
+    buffer.LockSize = vertexCount * stride;
+    return buffer.Data + buffer.LockOffset;
 }
 
 CKBOOL CKGXRasterizerContext::UnlockVertexBuffer(CKDWORD vb)
@@ -996,6 +1142,7 @@ CKBOOL CKGXRasterizerContext::UnlockVertexBuffer(CKDWORD vb)
         return FALSE;
     }
     resource->Buffer.Locked = FALSE;
+    StoreVertices(resource->Buffer, resource->Buffer.LockOffset, resource->Buffer.LockSize);
     ++m_FrameBufferUploads;
     return TRUE;
 }
@@ -1056,16 +1203,14 @@ CKBOOL CKGXRasterizerContext::DeleteObject(CKRST_HANDLE handle, CKRST_OBJECTTYPE
             if (m_Textures[stage] == handle)
                 m_Textures[stage] = 0;
         }
-        // The GPU may still sample it this frame.
-        if (resource->Texture.UsedThisFrame)
-            m_PendingFrees.PushBack(resource);
-        else
-            ReleaseResource(resource);
     }
+    // The GPU may still read it this frame. Index buffers are only read by the CPU.
+    const CKBOOL used = type == CKRST_OBJ_TEXTURE ? resource->Texture.UsedThisFrame
+                                                  : (type == CKRST_OBJ_VERTEXBUFFER && resource->Buffer.UsedThisFrame);
+    if (used)
+        m_PendingFrees.PushBack(resource);
     else
-    {
         ReleaseResource(resource);
-    }
     m_Resources[handle - 1] = NULL;
     return TRUE;
 }

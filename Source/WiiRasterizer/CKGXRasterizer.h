@@ -13,10 +13,17 @@
 //   lights       -> GX hardware lights (eye space)
 //   stage states -> TEV stages
 //   render state -> Z, blend, alpha compare, cull and fog registers
-// Vertices are sent in immediate mode, so the engine may reuse its buffers
-// as soon as a draw returns.
+// Vertices from engine memory are sent in immediate mode, so the engine may
+// reuse that memory as soon as a draw returns. Vertex buffers are GX arrays
+// instead: the GPU reads them itself and the CPU only sends indices, so a
+// buffer still waiting to be drawn is copied rather than changed in place.
 
 void CKGXRasterizerGetInfo(CKRasterizerInfo *info);
+
+// CKRenderContextStateGuard on the Wii (WiiPatches/RenderEngine/state-guard.patch):
+// FALSE when the context is not a GX one and the guard saves state itself.
+CKBOOL CKGXPushGuardedState(CKRasterizerContext *context);
+CKBOOL CKGXPopGuardedState(CKRasterizerContext *context);
 
 class CKGXRasterizer : public CKRasterizer
 {
@@ -51,9 +58,13 @@ struct CKGXTexture
 
 struct CKGXBuffer
 {
-    CKBYTE *Data;
+    CKBYTE *Data;           // 32-byte aligned; vertex buffers are read by the GPU
     CKDWORD Size;
     CKBOOL Locked;
+    CKDWORD LockOffset;     // Bytes written through the current lock
+    CKDWORD LockSize;
+    CKBOOL UsedThisFrame;   // A queued draw reads Data / Colors
+    u32 *Colors;            // Diffuse colours as GX RGBA, one per vertex
     CKVertexBufferDesc VertexDesc;
     CKIndexBufferDesc IndexDesc;
 };
@@ -147,12 +158,32 @@ public:
     int CopyFromMemoryBuffer(const CKRECT *rect, VXBUFFER_TYPE buffer, const VxImageDescEx &image) override;
     CKBOOL RequestReadback(const CKRECT *rect, VXBUFFER_TYPE buffer, CKReadbackCallback callback, void *user) override;
 
+    // The state CKRenderContextStateGuard keeps (render and texture stage
+    // states, textures, world / view / projection and texture matrices),
+    // saved and restored in one copy instead of a call per state. Guards are
+    // scoped, so the copies form a stack.
+    void PushGuardedState();
+    void PopGuardedState();
+
 private:
     enum Phase
     {
         PHASE_IDLE,
         PHASE_SCENE,
         PHASE_OVERLAY
+    };
+
+    struct GuardedState
+    {
+        CKDWORD RenderStates[VXRENDERSTATE_MAXSTATE];
+        CKDWORD StageStates[CKRST_MAX_TEXTURE_STAGES][CKRST_TSS_MAXSTATE];
+        uint64_t StageSetMasks[CKRST_MAX_TEXTURE_STAGES];
+        CKDWORD ResetStages;
+        CKDWORD Textures[CKRST_MAX_TEXTURE_STAGES];
+        VxMatrix TextureMatrices[CKRST_MAX_TEXTURE_STAGES];
+        VxMatrix World;
+        VxMatrix View;
+        VxMatrix Projection;
     };
 
     // A vertex stream described by the canonical layout or by separate pointers.
@@ -168,6 +199,7 @@ private:
         const CKBYTE *Texcoord[CKRST_MAX_TEXTURE_STAGES];
         CKDWORD TexcoordStride[CKRST_MAX_TEXTURE_STAGES];
         int TexcoordCount;
+        CKGXBuffer *Buffer;       // Set when the streams are GX arrays in a vertex buffer
     };
 
     CKBOOL CanWork() const { return m_Created && !m_ShuttingDown; }
@@ -175,6 +207,8 @@ private:
     CKGXResource *Find(CKRST_OBJECTTYPE type, CKDWORD handle) const;
     CKBOOL Insert(CKGXResource *resource, CKDWORD *outHandle);
     void ReleaseResource(CKGXResource *resource);
+    void StoreVertices(CKGXBuffer &buffer, CKDWORD offset, CKDWORD size);
+    void GpuIdle();
     void ResetMaterial();
     void SetStageBlend(int stage, CKDWORD value);
 
@@ -195,8 +229,7 @@ private:
     // Draw submission (CKGXDraw.cpp)
     CKBOOL Submit(VXPRIMITIVETYPE type, const VertexSource &source, CKDWORD vertexCount,
                   const CKWORD *indices, int indexCount, CKDWORD baseVertex);
-    void BuildVertexSource(CKDWORD format, const CKBYTE *data, CKDWORD stride, const CKBYTE *texcoordDims,
-                           VertexSource &source) const;
+    void BuildVertexSource(CKGXBuffer &buffer, CKDWORD startVertex, VertexSource &source) const;
     void DrawScreenQuad(float x0, float y0, float x1, float y1, float z, CKDWORD color,
                         CKBOOL writeColor, CKBOOL writeDepth);
 
@@ -221,11 +254,14 @@ private:
     // Resources: handle = index + 1
     XArray<CKGXResource *> m_Resources;
     XArray<CKGXResource *> m_PendingFrees;
+    XArray<void *> m_PendingBufferFrees;    // Vertex data replaced while the GPU may read it
+    CKBOOL m_VertexCacheDirty;
 
     // Engine-visible state
     CKDWORD m_RenderStates[VXRENDERSTATE_MAXSTATE];
     CKDWORD m_StageStates[CKRST_MAX_TEXTURE_STAGES][CKRST_TSS_MAXSTATE];
     uint64_t m_StageSetMasks[CKRST_MAX_TEXTURE_STAGES];
+    CKDWORD m_ResetStages;      // Bit per stage untouched since ResetTextureStages
     CKDWORD m_Textures[CKRST_MAX_TEXTURE_STAGES];
     VxMatrix m_Matrices[CKRST_MATRIX_SLOT_COUNT];
     CKLightData m_Lights[CKRST_MAX_LIGHTS];
@@ -236,6 +272,8 @@ private:
     VxPlane m_ClipPlanes[CKRST_MAX_USER_CLIP_PLANES];
 
     XClassArray<CKGXReadback> m_Readbacks;
+    XClassArray<GuardedState> m_GuardedStates;
+    int m_GuardDepth;
 
     // Statistics for the current frame
     CKDWORD m_FrameDrawCalls;

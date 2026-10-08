@@ -356,7 +356,7 @@ HOME (Start + Z on a GameCube controller) opens the HOME menu over the paused ga
 
 The game starts in the console's language when Ballance has it (German, English, Spanish, Italian or French) and in English otherwise; `Language` in `Player.ini` overrides it (0 German, 1 English, 2 Spanish, 3 Italian, 4 French).
 
-Every half minute `Player.log` records the frame rate, how each frame splits between work, waiting for the GPU and waiting for the TV, and how much memory is in use and free (every five seconds with `Verbose = 1`).
+Every half minute `Player.log` records the frame rate, how each frame splits between work (game logic and drawing), waiting for the GPU and waiting for the TV, how many objects and triangles a frame draws, and how much memory is in use and free (every five seconds with `Verbose = 1`).
 
 ### On-console tests
 
@@ -369,6 +369,10 @@ Every half minute `Player.log` records the frame rate, how each frame splits bet
 ```bash
 powerpc-eabi-addr2line -f -C -e build/wii/Source/WiiPlayer/boot.elf 0x80123456
 ```
+
+### Finding where the frame time goes
+
+Dolphin can count the emulated CPU cycles each function takes. Start `boot.elf` rather than `boot.dol` so Dolphin loads its symbols, turn on Options > Configuration > Interface > Enable Debugging UI, then JIT > Enable JIT Block Profiling. Play to the scene in question, choose JIT > Wipe JIT Block Profiling Data, play on for half a minute and choose JIT > Write JIT Block Log Dump. The dump (`Dump/Debug/JitBlocks/` in Dolphin's user folder) is a tab-separated list of code blocks with their cycles and function names; add up the cycles column per function to rank them. Dolphin does not model the console's caches, so memory-bound code costs more on a Wii than the dump shows; the frame times in `Player.log` from a console are the final word.
 
 ## Troubleshooting
 

@@ -68,10 +68,12 @@ configure_file("${_player_src}/StaticPluginRegistry.generated.h.in"
         "${_generated}/StaticPluginRegistry.generated.h" @ONLY)
 
 # Linked into each executable: a 1 MB main stack, like Windows gives the
-# engine (MainStack.c), and backslashes in file names (PathSeparators.c).
+# engine (MainStack.c), backslashes in file names (PathSeparators.c) and a
+# sqrtf that uses the hardware estimate instead of newlib's (FastMath.c).
 set(_console_runtime
         "${CMAKE_SOURCE_DIR}/Source/WiiPlatform/System/MainStack.c"
-        "${CMAKE_SOURCE_DIR}/Source/WiiPlatform/System/PathSeparators.c")
+        "${CMAKE_SOURCE_DIR}/Source/WiiPlatform/System/PathSeparators.c"
+        "${CMAKE_SOURCE_DIR}/Source/WiiPlatform/System/FastMath.c")
 set(_path_wraps _open_r _stat_r lstat _unlink_r _rename_r _rmdir_r mkdir opendir chdir statvfs)
 list(TRANSFORM _path_wraps PREPEND "LINKER:--wrap=")
 
@@ -149,6 +151,7 @@ add_executable(WiiPlayerTests
         tests/BehaviorTests.cpp
         tests/DatabaseTests.cpp
         tests/MemoryTests.cpp
+        tests/MathTests.cpp
         tests/InputTests.cpp
         "${_generated}/TestFont.c"
         "${_player_src}/StaticPlugins.cpp"

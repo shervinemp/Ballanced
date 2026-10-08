@@ -68,17 +68,19 @@ endfunction()
 
 # ballance_wii_patch(<name>
 #     ROOT <upstream directory>
-#     PATCH <patch file>
+#     PATCH <patch file>...
 #     FILES <paths relative to ROOT>...
 #     TARGETS <targets>...
 #     [PUBLIC_HEADERS])
 #
-# Copies FILES out of ROOT, applies PATCH to the copies and makes TARGETS build
-# the patched copies. List a header's same-directory includers in FILES too so
-# they pick up the patched header. PUBLIC_HEADERS also gives every consumer of
-# TARGETS the patched headers, for headers that change a public type.
+# Copies FILES out of ROOT, applies each PATCH in turn to the copies and makes
+# TARGETS build the patched copies. A file can only be copied once, so patches
+# to the same file go in the same call. List a header's same-directory
+# includers in FILES too so they pick up the patched header. PUBLIC_HEADERS
+# also gives every consumer of TARGETS the patched headers, for headers that
+# change a public type.
 function(ballance_wii_patch name)
-    cmake_parse_arguments(PARSE_ARGV 1 _arg "PUBLIC_HEADERS" "ROOT;PATCH" "FILES;TARGETS")
+    cmake_parse_arguments(PARSE_ARGV 1 _arg "PUBLIC_HEADERS" "ROOT" "PATCH;FILES;TARGETS")
 
     set(_staging "${BALLANCE_WII_PATCHED_DIR}/${name}.staging")
     set(_output "${BALLANCE_WII_PATCHED_DIR}/${name}")
@@ -91,9 +93,6 @@ function(ballance_wii_patch name)
         string(REPLACE "\r\n" "\n" _content "${_content}")
         file(WRITE "${_staging}/${_file}" "${_content}")
     endforeach ()
-    file(READ "${_arg_PATCH}" _patch)
-    string(REPLACE "\r\n" "\n" _patch "${_patch}")
-    file(WRITE "${_staging}.patch" "${_patch}")
 
     # A private repository keeps git from resolving paths against an enclosing checkout.
     execute_process(
@@ -101,18 +100,23 @@ function(ballance_wii_patch name)
             WORKING_DIRECTORY "${_staging}"
             RESULT_VARIABLE _result
     )
-    execute_process(
-            COMMAND "${GIT_EXECUTABLE}" apply --whitespace=nowarn "${_staging}.patch"
-            WORKING_DIRECTORY "${_staging}"
-            RESULT_VARIABLE _result
-            OUTPUT_VARIABLE _out
-            ERROR_VARIABLE _out
-    )
-    if (NOT _result EQUAL 0)
-        message(FATAL_ERROR
-                "[Wii] ${_arg_PATCH} no longer applies to ${_arg_ROOT}.\n"
-                "Re-merge the patch against the current submodule.\n${_out}")
-    endif ()
+    foreach (_patch_file IN LISTS _arg_PATCH)
+        file(READ "${_patch_file}" _patch)
+        string(REPLACE "\r\n" "\n" _patch "${_patch}")
+        file(WRITE "${_staging}.patch" "${_patch}")
+        execute_process(
+                COMMAND "${GIT_EXECUTABLE}" apply --whitespace=nowarn "${_staging}.patch"
+                WORKING_DIRECTORY "${_staging}"
+                RESULT_VARIABLE _result
+                OUTPUT_VARIABLE _out
+                ERROR_VARIABLE _out
+        )
+        if (NOT _result EQUAL 0)
+            message(FATAL_ERROR
+                    "[Wii] ${_patch_file} no longer applies to ${_arg_ROOT}.\n"
+                    "Re-merge the patch against the current submodule.\n${_out}")
+        endif ()
+    endforeach ()
 
     set(_patched_sources "")
     set(_patched_header_dirs "")
@@ -166,7 +170,7 @@ function(ballance_wii_patch name)
         endif ()
     endforeach ()
 
-    set_property(DIRECTORY "${PROJECT_SOURCE_DIR}" APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_arg_PATCH}")
+    set_property(DIRECTORY "${PROJECT_SOURCE_DIR}" APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_arg_PATCH})
     foreach (_file IN LISTS _arg_FILES)
         set_property(DIRECTORY "${PROJECT_SOURCE_DIR}" APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_arg_ROOT}/${_file}")
     endforeach ()
@@ -244,10 +248,12 @@ function(ballance_wii_port_render_engine)
             TARGETS CK2_3D
     )
     # On a 16:9 set the view widens to fill the stretched picture; the
-    # projection, the culling frustum and picking widen together.
+    # projection, the culling frustum and picking widen together. State guards
+    # around special draws let the GX rasterizer copy the state in one go.
     ballance_wii_patch(RenderEngineWidescreen
             ROOT "${_root}"
             PATCH "${BALLANCE_WII_PATCH_DIR}/RenderEngine/widescreen.patch"
+                  "${BALLANCE_WII_PATCH_DIR}/RenderEngine/state-guard.patch"
             FILES src/CKRenderContext.cpp src/CKRenderedScene.cpp
             TARGETS CK2_3D
     )

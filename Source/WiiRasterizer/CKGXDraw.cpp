@@ -1,4 +1,5 @@
-// Vertex submission: immediate mode through the GX FIFO.
+// Vertex submission through the GX FIFO: vertex buffers as indexed GX arrays,
+// engine memory in immediate mode.
 
 #include "CKGXRasterizer.h"
 
@@ -103,14 +104,17 @@ namespace
     }
 }
 
-void CKGXRasterizerContext::BuildVertexSource(CKDWORD format, const CKBYTE *data, CKDWORD stride,
-                                              const CKBYTE *texcoordDims, VertexSource &source) const
+void CKGXRasterizerContext::BuildVertexSource(CKGXBuffer &buffer, CKDWORD startVertex, VertexSource &source) const
 {
+    const CKVertexBufferDesc &desc = buffer.VertexDesc;
     CKRSTVertexLayout layout;
-    CKRSTGetVertexLayout(format, texcoordDims, &layout);
+    CKRSTGetVertexLayout(desc.m_VertexFormat, desc.m_TexcoordDims, &layout);
+    const CKDWORD stride = desc.m_VertexSize;
+    const CKBYTE *data = buffer.Data + (size_t)startVertex * stride;
 
     memset(&source, 0, sizeof(source));
-    source.Format = format;
+    source.Format = desc.m_VertexFormat;
+    source.Buffer = &buffer;
     source.Position = data + layout.PositionOffset;
     source.PositionStride = stride;
     if (layout.NormalOffset >= 0)
@@ -118,10 +122,11 @@ void CKGXRasterizerContext::BuildVertexSource(CKDWORD format, const CKBYTE *data
         source.Normal = data + layout.NormalOffset;
         source.NormalStride = stride;
     }
-    if (layout.DiffuseOffset >= 0)
+    if (layout.DiffuseOffset >= 0 && buffer.Colors)
     {
-        source.Diffuse = data + layout.DiffuseOffset;
-        source.DiffuseStride = stride;
+        // The RGBA copy, as GX reads colours.
+        source.Diffuse = (const CKBYTE *)(buffer.Colors + startVertex);
+        source.DiffuseStride = sizeof(u32);
     }
     for (int i = 0; i < layout.TexcoordCount; ++i)
     {
@@ -161,27 +166,47 @@ CKBOOL CKGXRasterizerContext::Submit(VXPRIMITIVETYPE type, const VertexSource &s
     // Vertex layout. Normals also feed sphere-map texture generation.
     const bool sendNormal = !pretransformed && source.Normal != NULL;
     const bool sendColor = source.Diffuse != NULL;
+    // Vertex buffer colours are already RGBA. GX arrays take an 8-bit stride
+    // and 16-bit indices.
+    const bool rgbaColors = source.Buffer != NULL;
+    const bool arrays = source.Buffer && source.PositionStride <= 255 && vertexCount <= 0x10000;
+    const u8 input = arrays ? GX_INDEX16 : GX_DIRECT;
     GX_ClearVtxDesc();
-    GX_SetVtxDesc(GX_VA_POS, GX_DIRECT);
+    GX_SetVtxDesc(GX_VA_POS, input);
     GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_F32, 0);
+    if (arrays)
+        GX_SetArray(GX_VA_POS, (void *)source.Position, (u8)source.PositionStride);
     if (sendNormal)
     {
-        GX_SetVtxDesc(GX_VA_NRM, GX_DIRECT);
+        GX_SetVtxDesc(GX_VA_NRM, input);
         GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_NRM, GX_NRM_XYZ, GX_F32, 0);
+        if (arrays)
+            GX_SetArray(GX_VA_NRM, (void *)source.Normal, (u8)source.NormalStride);
     }
     if (sendColor)
     {
-        GX_SetVtxDesc(GX_VA_CLR0, GX_DIRECT);
+        GX_SetVtxDesc(GX_VA_CLR0, input);
         GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_CLR_RGBA, GX_RGBA8, 0);
+        if (arrays)
+            GX_SetArray(GX_VA_CLR0, (void *)source.Diffuse, (u8)source.DiffuseStride);
     }
     int texcoordSets = 0;
     for (int i = 0; i < source.TexcoordCount && i < 8; ++i)
     {
         if (!source.Texcoord[i])
             break;
-        GX_SetVtxDesc(GX_VA_TEX0 + i, GX_DIRECT);
+        GX_SetVtxDesc(GX_VA_TEX0 + i, input);
         GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0 + i, GX_TEX_ST, GX_F32, 0);
+        if (arrays)
+            GX_SetArray(GX_VA_TEX0 + i, (void *)source.Texcoord[i], (u8)source.TexcoordStride[i]);
         texcoordSets = i + 1;
+    }
+    if (source.Buffer)
+        source.Buffer->UsedThisFrame = TRUE;
+    if (arrays && m_VertexCacheDirty)
+    {
+        GX_InvVtxCache();
+        m_VertexCacheDirty = FALSE;
     }
 
     auto vertexIndex = [&](int i) -> CKDWORD {
@@ -192,6 +217,17 @@ CKBOOL CKGXRasterizerContext::Submit(VXPRIMITIVETYPE type, const VertexSource &s
     // Position and texture coordinates from one vertex, normal and colour
     // from another (the same one unless flat shading).
     auto emit = [&](CKDWORD index, CKDWORD attributes) {
+        if (arrays)
+        {
+            GX_Position1x16((u16)index);
+            if (sendNormal)
+                GX_Normal1x16((u16)attributes);
+            if (sendColor)
+                GX_Color1x16((u16)attributes);
+            for (int set = 0; set < texcoordSets; ++set)
+                GX_TexCoord1x16((u16)index);
+            return;
+        }
         const float *position = (const float *)(source.Position + (size_t)index * source.PositionStride);
         GX_Position3f32(position[0], position[1], position[2]);
         if (sendNormal)
@@ -200,7 +236,10 @@ CKBOOL CKGXRasterizerContext::Submit(VXPRIMITIVETYPE type, const VertexSource &s
             GX_Normal3f32(normal[0], normal[1], normal[2]);
         }
         if (sendColor)
-            GX_Color1u32(ToRGBA(*(const u32 *)(source.Diffuse + (size_t)attributes * source.DiffuseStride)));
+        {
+            const u32 color = *(const u32 *)(source.Diffuse + (size_t)attributes * source.DiffuseStride);
+            GX_Color1u32(rgbaColors ? color : ToRGBA(color));
+        }
         for (int set = 0; set < texcoordSets; ++set)
         {
             const float *uv = (const float *)(source.Texcoord[set] + (size_t)index * source.TexcoordStride[set]);
@@ -267,14 +306,28 @@ CKBOOL CKGXRasterizerContext::Submit(VXPRIMITIVETYPE type, const VertexSource &s
         }
     }
 
+    // Every attribute of a vertex shares its index: send it once per attribute.
+    const int attributeCount = 1 + (sendNormal ? 1 : 0) + (sendColor ? 1 : 0) + texcoordSets;
     for (int start = 0; start < count; start += batch)
     {
         const int n = (count - start) < batch ? (count - start) : batch;
         GX_Begin(primitive, GX_VTXFMT0, (u16)n);
-        for (int i = 0; i < n; ++i)
+        if (arrays)
         {
-            const CKDWORD index = vertexIndex(start + i);
-            emit(index, index);
+            for (int i = 0; i < n; ++i)
+            {
+                const u16 index = (u16)vertexIndex(start + i);
+                for (int a = 0; a < attributeCount; ++a)
+                    wgPipe->U16 = index;
+            }
+        }
+        else
+        {
+            for (int i = 0; i < n; ++i)
+            {
+                const CKDWORD index = vertexIndex(start + i);
+                emit(index, index);
+            }
         }
         GX_End();
     }

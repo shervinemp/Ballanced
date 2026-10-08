@@ -30,6 +30,7 @@ namespace wiitest
 
 // Suites
 void RunMemoryTests();
+void RunMathTests();
 void RunChunkTests();
 void RunFileTests(CKContext *context);
 void RunReaderTests();

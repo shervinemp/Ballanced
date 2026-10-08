@@ -1,0 +1,34 @@
+--- a/src/CKRenderContext.cpp
++++ b/src/CKRenderContext.cpp
+@@ -1315,9 +1315,20 @@ void RCKRenderContext::DisableTextureStagesFrom(int FirstStage) {
+ // State guards
+ // ---------------------------------------------------------------------------
+ 
++#if defined(CKRE_STATIC_GX_RASTERIZER)
++// The GX rasterizer copies the guarded state in one go rather than through a
++// getter and a setter call per state, a large part of a Wii frame otherwise.
++extern CKBOOL CKGXPushGuardedState(CKRasterizerContext *context);
++extern CKBOOL CKGXPopGuardedState(CKRasterizerContext *context);
++#endif
++
+ CKRenderContextStateGuard::CKRenderContextStateGuard(CKRasterizerContext *Rst) : m_Rst(Rst) {
+     if (!m_Rst)
+         return;
++#if defined(CKRE_STATIC_GX_RASTERIZER)
++    if (CKGXPushGuardedState(m_Rst))
++        return;
++#endif
+     for (CKDWORD state = 0; state < (CKDWORD)VXRENDERSTATE_MAXSTATE; ++state)
+         m_Rst->GetRenderState((VXRENDERSTATETYPE)state, &m_RenderStates[state]);
+     for (int stage = 0; stage < CKRST_MAX_TEXTURE_STAGES; ++stage) {
+@@ -1338,6 +1349,10 @@ void CKRenderContextStateGuard::Restore() {
+         return;
+     CKRasterizerContext *rst = m_Rst;
+     m_Rst = NULL;
++#if defined(CKRE_STATIC_GX_RASTERIZER)
++    if (CKGXPopGuardedState(rst))
++        return;
++#endif
+ 
+     rst->SetTransformMatrix(VXMATRIX_WORLD, m_World);
+     rst->SetTransformMatrix(VXMATRIX_VIEW, m_View);
