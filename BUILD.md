@@ -325,6 +325,8 @@ apps/ballance/
   Database.tdb
   3D Entities/
   Sounds/
+  Sounds_low/     the game picks its smaller sounds when memory is short,
+                  as it always is on the Wii
   Text/
   Textures/
   Fonts/          Roboto, standing in for Windows fonts; add TrueType fonts
@@ -355,7 +357,7 @@ Every half minute `Player.log` records the frame rate, how each frame splits bet
 
 ### On-console tests
 
-`tests.dol` checks the memory available to the game, state chunk and file byte layouts, media readers and writers, sound playback, fonts, the game database, GX rasterizer output and the system screens drawn over it, building blocks, the on-screen keyboard, physics and a render engine scene, and writes a small demo composition to `sd:/apps/ballance-demo/base.cmo`. Copy it to `apps/wiitests/boot.dol` and start it; results appear on screen and in `sd:/wiitests.log`. In Dolphin, enable SD card folder sync and, under Graphics > Hacks, turn off "Skip EFB Access from CPU" and "Store EFB Copies to Texture Only" so the rasterizer checks can read the frame back. Turning on MMU emulation (Config > Advanced) makes invalid memory accesses fault as they would on a console instead of reading zeros.
+`tests.dol` checks the memory available to the game, state chunk and file byte layouts, media readers and writers, sound playback, fonts, the game database, GX rasterizer output and the system screens drawn over it, building blocks, the on-screen keyboard, physics and a render engine scene, and writes a small demo composition to `sd:/apps/ballance-demo/base.cmo`. Copy it to `apps/wiitests/boot.dol` and start it; results appear on screen and in `sd:/wiitests.log`. In Dolphin, enable SD card folder sync and, under Graphics > Hacks, turn off "Skip EFB Access from CPU" and "Store EFB Copies to Texture Only" so the rasterizer checks can read the frame back. Turning on MMU emulation (Config > Advanced) makes invalid memory accesses fault as they would on a console instead of reading zeros. For the game itself, set Graphics > Advanced > Texture Cache Accuracy to Safe: the fast setting samples too few texels to notice each new frame of the intro movie.
 
 ### When something goes wrong on the console
 

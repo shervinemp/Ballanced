@@ -6,7 +6,7 @@
   <short_description>Ballance for the Wii</short_description>
   <long_description>A source port of the Ballance runtime (Ballanced) to the Nintendo Wii.
 
-Copy base.cmo, Database.tdb and the 3D Entities, Sounds, Textures and Text folders from your own Ballance installation into this folder.
+Copy base.cmo, Database.tdb and the 3D Entities, Sounds, Sounds_low, Textures and Text folders from your own Ballance installation into this folder.
 
 Controls: hold the Wii Remote sideways (D-Pad moves the ball, 1 rotates the camera, 2 lifts the camera, + pauses), or use a Nunchuk, Classic Controller or GameCube controller. Point at the screen and press A in menus. An on-screen keyboard appears when the game asks for a name. HOME opens the HOME menu.</long_description>
 </app>

@@ -63,8 +63,8 @@ int main(int argc, char **argv)
         char message[512];
         snprintf(message, sizeof(message),
                  "  Copy the contents of your Ballance installation (base.cmo,\n"
-                 "  Database.tdb and the 3D Entities, Sounds, Textures and Text\n"
-                 "  folders) to %s next to boot.dol.", gamePath);
+                 "  Database.tdb and the 3D Entities, Sounds, Sounds_low,\n"
+                 "  Textures and Text folders) to %s next to boot.dol.", gamePath);
         wiisystem::ShowMessage("The Ballance game files were not found.", message);
         // Close the log while the storage device is still mounted.
         CLogger::Get().Close();
