@@ -54,6 +54,7 @@ int main(int argc, char **argv)
     const bool storage = wiisystem::Init(argc, argv);
     VxWiiSetApplicationPath(wiisystem::GetGamePath());
     VxWiiSetDisplaySize(wiisystem::GetRenderWidth(), wiisystem::GetRenderHeight());
+    VxWiiSetPixelAspect(wiisystem::IsWidescreen() ? 4.0f / 3.0f : 1.0f);
 
     if (storage)
         wiitest::OpenLog("sd:/wiitests.log");

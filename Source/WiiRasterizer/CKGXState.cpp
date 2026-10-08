@@ -7,8 +7,6 @@
 
 namespace
 {
-    const float kWidescreenScale = 0.75f; // 4:3 picture shown on a 16:9 set
-
     GXColor ToGXColor(CKDWORD argb)
     {
         GXColor color = {(u8)(argb >> 16), (u8)(argb >> 8), (u8)argb, (u8)(argb >> 24)};
@@ -148,7 +146,7 @@ namespace
 
     // Direct3D projection (row vectors, depth 0..1) to GX (column vectors,
     // camera looking down -Z, depth -1..0).
-    u8 ToGXProjection(const VxMatrix &p, Mtx44 out, bool widescreen)
+    u8 ToGXProjection(const VxMatrix &p, Mtx44 out)
     {
         for (int r = 0; r < 4; ++r)
         {
@@ -160,13 +158,7 @@ namespace
         for (int c = 0; c < 4; ++c)
             out[2][c] -= out[3][c];
 
-        const bool perspective = p[3][3] == 0.0f;
-        if (perspective && widescreen)
-        {
-            for (int c = 0; c < 4; ++c)
-                out[0][c] *= kWidescreenScale;
-        }
-        return perspective ? GX_PERSPECTIVE : GX_ORTHOGRAPHIC;
+        return p[3][3] == 0.0f ? GX_PERSPECTIVE : GX_ORTHOGRAPHIC;
     }
 
     void TransformPoint(const VxMatrix &m, const VxVector &v, guVector &out)
@@ -265,8 +257,7 @@ void CKGXRasterizerContext::ApplyTransforms(CKBOOL pretransformed)
     }
 
     Mtx44 projection;
-    const u8 type = ToGXProjection(m_Matrices[CKRSTMatrixSlot(VXMATRIX_PROJECTION)], projection,
-                                   m_Widescreen && !m_Target);
+    const u8 type = ToGXProjection(m_Matrices[CKRSTMatrixSlot(VXMATRIX_PROJECTION)], projection);
     GX_LoadProjectionMtx(projection, type);
 
     Mtx modelView, normal;

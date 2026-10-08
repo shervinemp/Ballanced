@@ -33,6 +33,7 @@
 static XString g_ApplicationPath;
 static int g_DisplayWidth = 640;
 static int g_DisplayHeight = 480;
+static float g_PixelAspect = 1.0f;
 
 void VxWiiSetApplicationPath(const char *path) {
     g_ApplicationPath = path ? path : "";
@@ -57,6 +58,15 @@ void VxWiiGetDisplaySize(int *width, int *height) {
         *width = g_DisplayWidth;
     if (height)
         *height = g_DisplayHeight;
+}
+
+void VxWiiSetPixelAspect(float aspect) {
+    if (aspect > 0.0f)
+        g_PixelAspect = aspect;
+}
+
+float VxWiiGetPixelAspect() {
+    return g_PixelAspect;
 }
 
 static volatile XBOOL g_TextInputRequested = FALSE;

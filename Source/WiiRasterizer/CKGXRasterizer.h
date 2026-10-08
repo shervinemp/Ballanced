@@ -211,7 +211,6 @@ private:
     void *m_Fifo;
     Phase m_Phase;
     CKBOOL m_FrameOpen;
-    CKBOOL m_Widescreen;
     CKBOOL m_InvalidateTextures;
 
     // Render target

@@ -1,0 +1,77 @@
+diff --git a/src/CKRenderContext.cpp b/src/CKRenderContext.cpp
+index 37e857f..e58727f 100644
+--- a/src/CKRenderContext.cpp
++++ b/src/CKRenderContext.cpp
+@@ -26,6 +26,9 @@
+ #include "CKSprite.h"
+ #include "CK3dEntity.h"
+ #include "CKCamera.h"
++#if defined(GEKKO)
++#include "VxWiiPlatform.h"
++#endif
+ #include "CKSceneGraph.h"
+ #include "RCKRenderManager.h"
+ #include "RCKRenderObject.h"
+@@ -2075,6 +2078,10 @@ CK3dEntity *RCKRenderContext::Pick3D(const Vx2DVector &pt, VxIntersectionDesc *i
+         // IDA line 179-182: Perspective projection
+         const float halfFovTan = tanf(m_Fov * 0.5f);
+         rayEnd.x = nx * m_NearPlane * halfFovTan;
++#if defined(GEKKO)
++        if (!m_TargetTexture)
++            rayEnd.x *= VxWiiGetPixelAspect(); // The view is wider on a 16:9 set.
++#endif
+         rayEnd.y = ny * m_NearPlane * halfFovTan;
+     } else {
+         // IDA line 186-189: Orthographic projection
+@@ -3198,8 +3205,20 @@ void RCKRenderContext::UpdateProjection(CKBOOL forceUpdate) {
+ 
+     const float aspect = (float) ((double) m_ViewportData.ViewWidth / (double) m_ViewportData.ViewHeight);
+ 
++#if defined(GEKKO)
++    // On a 16:9 set the TV stretches the frame buffer by the pixel aspect:
++    // widen the horizontal field of view as much and keep the vertical one,
++    // so the picture keeps its proportions and shows more at the sides.
++    // Textures rendered to keep square pixels.
++    const float stretch = m_TargetTexture ? 1.0f : VxWiiGetPixelAspect();
++    const float fov = 2.0f * atanf(tanf(m_Fov * 0.5f) * stretch);
++    const float perspectiveAspect = aspect * stretch;
++#else
++    const float fov = m_Fov;
++    const float perspectiveAspect = aspect;
++#endif
+     if (m_Perspective)
+-        m_ProjectionMatrix.Perspective(m_Fov, aspect, m_NearPlane, m_FarPlane);
++        m_ProjectionMatrix.Perspective(fov, perspectiveAspect, m_NearPlane, m_FarPlane);
+     else
+         m_ProjectionMatrix.Orthographic(m_Zoom, aspect, m_NearPlane, m_FarPlane);
+ 
+diff --git a/src/CKRenderedScene.cpp b/src/CKRenderedScene.cpp
+index 327e7db..fee8bd3 100644
+--- a/src/CKRenderedScene.cpp
++++ b/src/CKRenderedScene.cpp
+@@ -1,4 +1,7 @@
+ #include "CKRenderedScene.h"
++#if defined(GEKKO)
++#include "VxWiiPlatform.h"
++#endif
+ 
+ #include "CKDebugLogger.h"
+ #include "CKRenderSettings.h"
+@@ -227,8 +230,17 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
+         VxVector *up = (VxVector *) &rootEntity->m_WorldMatrix[1];
+         VxVector *dir = (VxVector *) &rootEntity->m_WorldMatrix[2];
+ 
++#if defined(GEKKO)
++        // Cull with the view widened for a 16:9 set (see
++        // RCKRenderContext::UpdateProjection). VxFrustum's vertical bound grows
++        // with the aspect it is given, so divide that by the stretch to keep it.
++        const float stretch = rc->m_TargetTexture ? 1.0f : VxWiiGetPixelAspect();
++        VxFrustum frustum(*origin, *vright, *up, *dir, rc->m_NearPlane, rc->m_FarPlane,
++                          2.0f * atanf(tanf(rc->m_Fov * 0.5f) * stretch), aspectRatio / stretch);
++#else
+         VxFrustum frustum(*origin, *vright, *up, *dir,
+                           rc->m_NearPlane, rc->m_FarPlane, rc->m_Fov, aspectRatio);
++#endif
+         rc->m_Frustum = frustum;
+ 
+         rc->m_RasterizerContext->SetTransformMatrix(VXMATRIX_WORLD, VxMatrix::Identity());

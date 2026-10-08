@@ -30,6 +30,7 @@ int main(int argc, char **argv)
     const char *gamePath = wiisystem::GetGamePath();
     VxWiiSetApplicationPath(gamePath);
     VxWiiSetDisplaySize(wiisystem::GetRenderWidth(), wiisystem::GetRenderHeight());
+    VxWiiSetPixelAspect(wiisystem::IsWidescreen() ? 4.0f / 3.0f : 1.0f);
 
     if (!storage)
     {

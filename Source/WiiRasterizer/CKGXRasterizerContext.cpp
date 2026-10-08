@@ -33,7 +33,6 @@ CKGXRasterizerContext::CKGXRasterizerContext(CKRasterizerDriver *driver)
       m_Fifo(NULL),
       m_Phase(PHASE_IDLE),
       m_FrameOpen(FALSE),
-      m_Widescreen(FALSE),
       m_InvalidateTextures(TRUE),
       m_Target(0),
       m_TargetWidth(0),
@@ -84,7 +83,6 @@ void CKGXRasterizerContext::InitVideo()
     m_Mode = wiisystem::GetVideoMode();
     if (!m_Mode)
         m_Mode = VIDEO_GetPreferredMode(NULL);
-    m_Widescreen = wiisystem::IsWidescreen();
 
     for (int i = 0; i < 2; ++i)
     {

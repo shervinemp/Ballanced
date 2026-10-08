@@ -14,6 +14,12 @@ VX_EXPORT const char *VxWiiGetApplicationPath();
 VX_EXPORT void VxWiiSetDisplaySize(int width, int height);
 VX_EXPORT void VxWiiGetDisplaySize(int *width, int *height);
 
+// How much wider than tall the TV shows each pixel of that picture: 4/3 when
+// a 16:9 set stretches it, 1 otherwise. The render engine widens its
+// horizontal field of view (and culling) by as much.
+VX_EXPORT void VxWiiSetPixelAspect(float aspect);
+VX_EXPORT float VxWiiGetPixelAspect();
+
 // Text entry. Blocks that read typed text call VxWiiRequestTextInput every
 // frame they run; the input manager shows the on-screen keyboard while the
 // requests keep coming. VxWiiConsumeTextInputRequest reports whether text was

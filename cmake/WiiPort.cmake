@@ -243,6 +243,14 @@ function(ballance_wii_port_render_engine)
             FILES src/CKObjectAnimation.cpp src/CKSprite.cpp src/CKTexture.cpp
             TARGETS CK2_3D
     )
+    # On a 16:9 set the view widens to fill the stretched picture; the
+    # projection, the culling frustum and picking widen together.
+    ballance_wii_patch(RenderEngineWidescreen
+            ROOT "${_root}"
+            PATCH "${BALLANCE_WII_PATCH_DIR}/RenderEngine/widescreen.patch"
+            FILES src/CKRenderContext.cpp src/CKRenderedScene.cpp
+            TARGETS CK2_3D
+    )
     _ballance_wii_resolve_target(_ck2_3d CK2_3D)
     target_compile_definitions(${_ck2_3d} PRIVATE CKRE_STATIC_GX_RASTERIZER)
     target_link_libraries(${_ck2_3d} PUBLIC CKGXRasterizer)

@@ -160,7 +160,8 @@ namespace wiisystem
         g_Widescreen = CONF_GetAspectRatio() == CONF_ASPECT_16_9;
         if (g_Widescreen)
         {
-            // Fill the width of a 16:9 set; the rasterizer widens the projection to match.
+            // Fill the width of a 16:9 set; the render engine widens its view to
+            // match (VxWiiSetPixelAspect).
             g_VideoMode->viWidth = 678;
             g_VideoMode->viXOrigin = (VI_MAX_WIDTH_NTSC - 678) / 2;
         }
