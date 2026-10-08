@@ -3,7 +3,6 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 #include <ogc/lwp_watchdog.h>
 
@@ -421,28 +420,15 @@ bool WiiGamePlayer::Update()
     if (!m_Running)
         return false;
 
-    float beforeRender = 0.0f;
-    float beforeProcess = 0.0f;
-    m_TimeManager->GetTimeToWaitForLimits(beforeRender, beforeProcess);
-
-    bool worked = false;
-    if (beforeProcess <= 0.0f)
-    {
-        m_TimeManager->ResetChronos(FALSE, TRUE);
-        m_CKContext->Process();
-        worked = true;
-    }
-    if (beforeRender <= 0.0f)
-    {
-        m_TimeManager->ResetChronos(TRUE, FALSE);
-        m_RenderContext->Render(); // Waits for the vertical blank
-        worked = true;
-        // Levels load from scripts, so check the heap and the frame time now and then.
-        if (++m_FrameCount - m_ReportFrame >= (m_Config.verbose ? 300u : 1800u))
-            LogPerformance();
-    }
-    if (!worked)
-        usleep(1000);
+    // One frame per vertical blank: Render waits for it, so the TV paces the
+    // game. Following the time manager's frame rate limit as well (60 Hz in
+    // Ballance) would beat against the TV's 59.94 or 50 Hz and drop frames.
+    m_TimeManager->ResetChronos(TRUE, TRUE);
+    m_CKContext->Process();
+    m_RenderContext->Render();
+    // Levels load from scripts, so check the heap and the frame time now and then.
+    if (++m_FrameCount - m_ReportFrame >= (m_Config.verbose ? 300u : 1800u))
+        LogPerformance();
     return true;
 }
 
