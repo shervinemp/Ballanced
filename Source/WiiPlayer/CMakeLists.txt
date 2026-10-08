@@ -76,6 +76,11 @@ set(_console_runtime
         "${CMAKE_SOURCE_DIR}/Source/WiiPlatform/System/FastMath.c")
 set(_path_wraps _open_r _stat_r lstat _unlink_r _rename_r _rmdir_r mkdir opendir chdir statvfs)
 list(TRANSFORM _path_wraps PREPEND "LINKER:--wrap=")
+# DolAlign.ld rounds the code and data segments up to 32 bytes, so each DOL
+# section size is a multiple of 32. Giving -T replaces the linker script gcc
+# picks for -mrvl, so rvl.ld is named after it.
+set(_dol_align "${CMAKE_SOURCE_DIR}/Source/WiiPlatform/System/DolAlign.ld")
+set(_console_link_options ${_path_wraps} "SHELL:-T \"${_dol_align}\"" "SHELL:-T rvl.ld")
 
 add_executable(WiiPlayer
         main.cpp
@@ -97,8 +102,9 @@ target_include_directories(WiiPlayer PRIVATE
         "${_generated}"
 )
 target_link_libraries(WiiPlayer PRIVATE ${_static_targets} CK2 VxMath WiiSystem)
-target_link_options(WiiPlayer PRIVATE ${_path_wraps})
-set_target_properties(WiiPlayer PROPERTIES OUTPUT_NAME boot SUFFIX ".elf")
+target_link_options(WiiPlayer PRIVATE ${_console_link_options})
+set_target_properties(WiiPlayer PROPERTIES OUTPUT_NAME boot SUFFIX ".elf"
+        LINK_DEPENDS "${_dol_align}")
 
 # Wii storage paths ("sd:/") in the shared player helpers.
 ballance_wii_patch(Player
@@ -109,16 +115,6 @@ ballance_wii_patch(Player
 )
 
 ogc_create_dol(WiiPlayer)
-
-# elf2dol leaves the last section's size unaligned at the end of the file;
-# loaders read sections in 32-byte units, and Dolphin rejects a DOL whose
-# rounded-up last section runs past the end of the file.
-find_program(PADBIN_EXE NAMES padbin HINTS "${DEVKITPRO}/tools/bin" REQUIRED)
-add_custom_command(TARGET WiiPlayer POST_BUILD
-        COMMAND "${PADBIN_EXE}" 32 "$<TARGET_FILE_DIR:WiiPlayer>/boot.dol"
-        COMMENT "Padding boot.dol to 32 bytes"
-        VERBATIM
-)
 
 # On-console tests (tests.dol): state chunk and file byte layouts, media
 # readers and GX rasterizer pixels. Run from the SD card or in Dolphin.
@@ -165,13 +161,10 @@ target_include_directories(WiiPlayerTests PRIVATE "${_player_src}" "${_generated
         "${CMAKE_SOURCE_DIR}/Source/BuildingBlocks/TT_DatabaseManager_RT"
         "${CMAKE_SOURCE_DIR}/Source/Managers/WiiInputManager")
 target_link_libraries(WiiPlayerTests PRIVATE ${_static_targets} CKGXRasterizer CK2 VxMath WiiSystem ivp_controller)
-target_link_options(WiiPlayerTests PRIVATE ${_path_wraps})
-set_target_properties(WiiPlayerTests PROPERTIES OUTPUT_NAME tests SUFFIX ".elf")
+target_link_options(WiiPlayerTests PRIVATE ${_console_link_options})
+set_target_properties(WiiPlayerTests PROPERTIES OUTPUT_NAME tests SUFFIX ".elf"
+        LINK_DEPENDS "${_dol_align}")
 ogc_create_dol(WiiPlayerTests)
-add_custom_command(TARGET WiiPlayerTests POST_BUILD
-        COMMAND "${PADBIN_EXE}" 32 "$<TARGET_FILE_DIR:WiiPlayerTests>/tests.dol"
-        VERBATIM
-)
 
 # Homebrew Channel layout: apps/ballance/{boot.dol,meta.xml,icon.png}; the
 # game files are copied next to them.
