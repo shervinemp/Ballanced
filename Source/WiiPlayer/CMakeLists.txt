@@ -67,12 +67,17 @@ endforeach ()
 configure_file("${_player_src}/StaticPluginRegistry.generated.h.in"
         "${_generated}/StaticPluginRegistry.generated.h" @ONLY)
 
-# A 1 MB main stack, like Windows gives the engine (see MainStack.c).
-set(_main_stack "${CMAKE_SOURCE_DIR}/Source/WiiPlatform/System/MainStack.c")
+# Linked into each executable: a 1 MB main stack, like Windows gives the
+# engine (MainStack.c), and backslashes in file names (PathSeparators.c).
+set(_console_runtime
+        "${CMAKE_SOURCE_DIR}/Source/WiiPlatform/System/MainStack.c"
+        "${CMAKE_SOURCE_DIR}/Source/WiiPlatform/System/PathSeparators.c")
+set(_path_wraps _open_r _stat_r lstat _unlink_r _rename_r _rmdir_r mkdir opendir chdir statvfs)
+list(TRANSFORM _path_wraps PREPEND "LINKER:--wrap=")
 
 add_executable(WiiPlayer
         main.cpp
-        "${_main_stack}"
+        ${_console_runtime}
         WiiGamePlayer.cpp
         WiiGamePlayer.h
         "${_player_src}/GameConfig.cpp"
@@ -90,6 +95,7 @@ target_include_directories(WiiPlayer PRIVATE
         "${_generated}"
 )
 target_link_libraries(WiiPlayer PRIVATE ${_static_targets} CK2 VxMath WiiSystem)
+target_link_options(WiiPlayer PRIVATE ${_path_wraps})
 set_target_properties(WiiPlayer PROPERTIES OUTPUT_NAME boot SUFFIX ".elf")
 
 # Wii storage paths ("sd:/") in the shared player helpers.
@@ -128,7 +134,7 @@ configure_file("${_generated}/TestFont.c.in" "${_generated}/TestFont.c" COPYONLY
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_test_font}")
 add_executable(WiiPlayerTests
         tests/main.cpp
-        "${_main_stack}"
+        ${_console_runtime}
         tests/TestFramework.cpp
         tests/TestFramework.h
         tests/ChunkTests.cpp
@@ -156,6 +162,7 @@ target_include_directories(WiiPlayerTests PRIVATE "${_player_src}" "${_generated
         "${CMAKE_SOURCE_DIR}/Source/BuildingBlocks/TT_DatabaseManager_RT"
         "${CMAKE_SOURCE_DIR}/Source/Managers/WiiInputManager")
 target_link_libraries(WiiPlayerTests PRIVATE ${_static_targets} CKGXRasterizer CK2 VxMath WiiSystem ivp_controller)
+target_link_options(WiiPlayerTests PRIVATE ${_path_wraps})
 set_target_properties(WiiPlayerTests PROPERTIES OUTPUT_NAME tests SUFFIX ".elf")
 ogc_create_dol(WiiPlayerTests)
 add_custom_command(TARGET WiiPlayerTests POST_BUILD
