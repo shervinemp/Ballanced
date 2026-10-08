@@ -253,8 +253,7 @@
         "VXMATH_BUILD_TESTS": "ON",
         "CKRE_BUILD_TESTS": "ON",
         "CKBB_BUILD_TESTS": "ON",
-        "CKPLUGINS_BUILD_TESTS": "ON",
-        "SDLINPUT_BUILD_TESTS": "ON"
+        "CKPLUGINS_BUILD_TESTS": "ON"
       }
     },
     {
@@ -267,8 +266,7 @@
         "VXMATH_BUILD_TESTS": "ON",
         "CKRE_BUILD_TESTS": "ON",
         "CKBB_BUILD_TESTS": "ON",
-        "CKPLUGINS_BUILD_TESTS": "ON",
-        "SDLINPUT_BUILD_TESTS": "ON"
+        "CKPLUGINS_BUILD_TESTS": "ON"
       }
     },
     {
@@ -281,8 +279,7 @@
         "VXMATH_BUILD_TESTS": "ON",
         "CKRE_BUILD_TESTS": "ON",
         "CKBB_BUILD_TESTS": "ON",
-        "CKPLUGINS_BUILD_TESTS": "ON",
-        "SDLINPUT_BUILD_TESTS": "ON"
+        "CKPLUGINS_BUILD_TESTS": "ON"
       }
     },
     {
@@ -295,8 +292,7 @@
         "VXMATH_BUILD_TESTS": "ON",
         "CKRE_BUILD_TESTS": "ON",
         "CKBB_BUILD_TESTS": "ON",
-        "CKPLUGINS_BUILD_TESTS": "ON",
-        "SDLINPUT_BUILD_TESTS": "ON"
+        "CKPLUGINS_BUILD_TESTS": "ON"
       }
     },
     {
@@ -309,8 +305,7 @@
         "VXMATH_BUILD_TESTS": "ON",
         "CKRE_BUILD_TESTS": "ON",
         "CKBB_BUILD_TESTS": "ON",
-        "CKPLUGINS_BUILD_TESTS": "ON",
-        "SDLINPUT_BUILD_TESTS": "ON"
+        "CKPLUGINS_BUILD_TESTS": "ON"
       }
     },
     {
@@ -323,8 +318,7 @@
         "VXMATH_BUILD_TESTS": "ON",
         "CKRE_BUILD_TESTS": "ON",
         "CKBB_BUILD_TESTS": "ON",
-        "CKPLUGINS_BUILD_TESTS": "ON",
-        "SDLINPUT_BUILD_TESTS": "ON"
+        "CKPLUGINS_BUILD_TESTS": "ON"
       }
     },
     {
@@ -337,8 +331,7 @@
         "VXMATH_BUILD_TESTS": "ON",
         "CKRE_BUILD_TESTS": "ON",
         "CKBB_BUILD_TESTS": "ON",
-        "CKPLUGINS_BUILD_TESTS": "ON",
-        "SDLINPUT_BUILD_TESTS": "ON"
+        "CKPLUGINS_BUILD_TESTS": "ON"
       }
     }
   ],
