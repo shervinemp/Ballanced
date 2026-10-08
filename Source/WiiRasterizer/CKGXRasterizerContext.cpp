@@ -751,10 +751,15 @@ CKBOOL CKGXRasterizerContext::DrawPrimitive(VXPRIMITIVETYPE type, CKWORD *indice
         source.Diffuse = (const CKBYTE *)data->ColorPtr;
         source.DiffuseStride = data->ColorStride;
     }
+    // CKRST_DP_STAGESn means texture coordinates for stages 0 to n.
+    int stages = 0;
     for (int stage = 0; stage < CKRST_MAX_TEXTURE_STAGES; ++stage)
     {
-        if (!(data->Flags & CKRST_DP_STAGE(stage)))
-            continue;
+        if (data->Flags & CKRST_DP_STAGE(stage))
+            stages = stage + 1;
+    }
+    for (int stage = 0; stage < stages; ++stage)
+    {
         source.Texcoord[stage] = (const CKBYTE *)(stage == 0 ? data->TexCoordPtr : data->TexCoordPtrs[stage - 1]);
         source.TexcoordStride[stage] = stage == 0 ? data->TexCoordStride : data->TexCoordStrides[stage - 1];
         if (source.Texcoord[stage])

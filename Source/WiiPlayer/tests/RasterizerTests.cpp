@@ -387,6 +387,52 @@ namespace
         ctx->DeleteObject(texture4444, CKRST_OBJ_TEXTURE);
     }
 
+    // A mesh channel folded into stage 1, as the render engine draws Ballance's
+    // ball shadow on the floor: CKRST_DP_STAGES1 brings coordinates for stages
+    // 0 and 1, and the channel's ZERO/SRCCOLOR blend multiplies its texture in.
+    void TestTextureChannel(CKRasterizerContext *ctx)
+    {
+        const CKDWORD red[1] = {0xFFFF0000};
+        const CKDWORD whiteGrey[2] = {0xFFFFFFFF, 0xFF808080};
+        const CKDWORD base = CreateTexture(ctx, _32_ARGB8888, 1, 1, red);
+        const CKDWORD shadow = CreateTexture(ctx, _32_ARGB8888, 2, 1, whiteGrey);
+        SetTextureState(ctx, base);
+        ctx->SetTexture(shadow, 1);
+        ctx->SetTextureStageState(1, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_NEAREST);
+        ctx->SetTextureStageState(1, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
+        ctx->SetTextureStageState(1, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSCLAMP);
+        ctx->SetTextureStageState(1, CKRST_TSS_STAGEBLEND, STAGEBLEND(VXBLEND_ZERO, VXBLEND_SRCCOLOR));
+        ctx->SetTextureStageState(1, CKRST_TSS_TEXCOORDINDEX, CKRSTPackTexcoordIndex(1, CKRST_TEXGEN_PASSTHRU));
+
+        VxVector positions[4] = {VxVector(-1, 1, 0.5f), VxVector(1, 1, 0.5f), VxVector(1, -1, 0.5f),
+                                 VxVector(-1, -1, 0.5f)};
+        CKDWORD colors[4] = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF};
+        float baseUvs[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+        float shadowUvs[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+        VxDrawPrimitiveData data;
+        memset(&data, 0, sizeof(data));
+        data.VertexCount = 4;
+        data.Flags = (CKRST_DP_TR_CL_VCT & ~CKRST_DP_STAGESMASK) | CKRST_DP_STAGES1;
+        data.PositionPtr = positions;
+        data.PositionStride = sizeof(VxVector);
+        data.ColorPtr = colors;
+        data.ColorStride = sizeof(CKDWORD);
+        data.TexCoordPtr = baseUvs;
+        data.TexCoordStride = sizeof(baseUvs[0]);
+        data.TexCoordPtrs[0] = shadowUvs;
+        data.TexCoordStrides[0] = sizeof(shadowUvs[0]);
+        BeginFrame(ctx, 0xFF000000);
+        ctx->DrawPrimitive(VX_TRIANGLEFAN, NULL, 0, &data);
+        EndFrame(ctx);
+        EXPECT_PIXEL(ctx, 160, 240, 255, 0, 0, "base texture under a white channel texel");
+        EXPECT_PIXEL(ctx, 480, 240, 128, 0, 0, "base texture darkened by a grey channel texel");
+
+        ctx->SetTextureStageState(1, CKRST_TSS_STAGEBLEND, 0);
+        ctx->SetTexture(0, 1);
+        ctx->DeleteObject(base, CKRST_OBJ_TEXTURE);
+        ctx->DeleteObject(shadow, CKRST_OBJ_TEXTURE);
+    }
+
     void TestFog(CKRasterizerContext *ctx)
     {
         // Fog uses eye-space depth: z = 10 between start 0 and end 20.
@@ -634,6 +680,7 @@ void RunRasterizerTests()
     TestDepth(ctx);
     TestBlending(ctx);
     TestTextures(ctx);
+    TestTextureChannel(ctx);
     TestFog(ctx);
     TestLighting(ctx);
     TestPointAndSpotLights(ctx);
