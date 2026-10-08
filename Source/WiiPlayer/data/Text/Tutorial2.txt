@@ -1,0 +1,41 @@
+Game Tutorial:
+Press + at any time to pause or quit the game.
+Press A to continue the tutorial, or - to skip it.
+*View Rotation:
+Hold 1 (Nunchuk: Z) and press left or right to turn the view in 90° steps.
+
+Continue with A ...
+*Overview:
+Hold 2 (Nunchuk: C) to raise the viewpoint.
+
+Continue with A ...
+*Navigation:
+Turn the view until the track with the two towers lies ahead of you.
+Roll the ball forward, back, left and right with the +Control Pad (Nunchuk: Control Stick), without holding 1.
+
+Follow the path!
+*Extra Life:
+Falling off the track costs you a life. The lives you have left are shown at the bottom right of the screen. Collect an Extra Life to gain another one.
+
+Continue with A ...
+*Transformers:
+Transformers change what your ball is made of. The surface of the transformer field shows which material you will get. This is a stone transformer.
+
+Continue with A ...
+*This slope is too steep for a stone ball!
+Find a wood transformer and try again.
+Tip: turn the view now and then (1 + left/right) to find your way. Careful when rolling backwards!
+
+Continue with A ...
+*Extra Points:
+The counter on the left shows your time points, which keep running down as you play. Collect Extra Points to add to your score.
+
+Continue with A ...
+*Checkpoints:
+This is the first checkpoint on your way. If you lose a life, you continue from the last checkpoint you passed.
+
+Continue with A ...
+*One last thing:
+Press HOME at any time for the HOME Menu, where you can return to the Homebrew Channel or the Wii Menu.
+
+Leave the tutorial with A ...

@@ -1,2 +1,4 @@
 # Applied with git apply by cmake/WiiPort.cmake; keep their line endings stable.
 Source/WiiPatches/**/*.patch text eol=lf
+# The Wii tutorial texts are Windows-1252 with CRLF, like the game files they replace.
+Source/WiiPlayer/data/Text/*.txt -text

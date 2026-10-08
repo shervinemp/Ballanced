@@ -191,3 +191,9 @@ install(FILES "${_fonts}/LICENSE"
         RENAME Roboto-LICENSE.txt
         COMPONENT Runtime
 )
+# Wii versions of game files written for the PC, read in their place (see
+# VxWiiFindPortFile): the tutorial texts, naming the Wii controls.
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/data/Text"
+        DESTINATION apps/ballance/Wii
+        COMPONENT Runtime
+)

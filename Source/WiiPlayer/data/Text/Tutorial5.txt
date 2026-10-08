@@ -1,0 +1,41 @@
+Initiation au jeu:
+Appuyez sur + à tout moment pour mettre le jeu en pause ou le quitter.
+Appuyez sur A pour poursuivre l'initiation ou sur - pour la passer.
+*Rotation de la vue:
+Maintenez 1 (Nunchuk: Z) enfoncé et appuyez à gauche ou à droite pour faire pivoter la vue par paliers de 90°.
+
+Continuez avec A ...
+*Vue d'ensemble:
+Maintenez 2 (Nunchuk: C) enfoncé pour élever le point de vue.
+
+Continuez avec A ...
+*Navigation:
+Faites pivoter la vue jusqu'à ce que le chemin aux deux tours se trouve devant vous.
+Faites rouler la boule vers l'avant, l'arrière, la gauche et la droite avec la croix directionnelle (Nunchuk: stick), sans maintenir 1.
+
+Suivez le chemin!
+*Vie supplémentaire:
+Si vous tombez, vous perdez une vie. Les vies qui vous restent sont affichées en bas à droite. Ramassez une vie supplémentaire pour en gagner une de plus.
+
+Continuez avec A ...
+*Transformateurs:
+Les transformateurs changent la matière de votre boule. La surface du transformateur indique la matière que vous obtiendrez. Ceci est un transformateur de pierre.
+
+Continuez avec A ...
+*Cette pente est trop raide pour une boule de pierre!
+Cherchez un transformateur de bois et réessayez.
+Astuce: faites pivoter la vue de temps en temps (1 + gauche/droite) pour vous repérer. Attention en reculant!
+
+Continuez avec A ...
+*Points supplémentaires:
+Le compteur de gauche affiche vos points de temps, qui diminuent sans cesse pendant la partie. Ramassez des points supplémentaires pour augmenter votre score.
+
+Continuez avec A ...
+*Points de contrôle:
+Voici le premier point de contrôle de votre parcours. Si vous perdez une vie, vous repartez du dernier point de contrôle franchi.
+
+Continuez avec A ...
+*Pour finir:
+Appuyez sur HOME à tout moment pour ouvrir le menu HOME, d'où vous pouvez revenir à l'Homebrew Channel ou au menu Wii.
+
+Quittez l'initiation avec A ...

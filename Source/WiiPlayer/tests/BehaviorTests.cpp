@@ -1,17 +1,20 @@
 // Building blocks run on the console: blocks that edit textures must address
 // the channels of host-order ARGB texels, and raw buffers that blocks save in
-// files arrive little-endian.
+// files arrive little-endian. Texts the port replaces come from its Wii folder.
 
 #include "TestFramework.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "CKAll.h"
+#include "VxWiiPlatform.h"
 
 namespace
 {
     const CKGUID kCombineTextureGuid(0x84BE2329, 0xAED66CE1);
     const CKGUID kTextureSineGuid(0x9c1208, 0x3a8d779e);
+    const CKGUID kLoadStringGuid(0x391555d6, 0x42f2500e);
 
     CKTexture *CreateTexture(CKContext *context, const char *name, CKDWORD texel)
     {
@@ -96,6 +99,63 @@ namespace
         }
         context->DestroyObject(beh);
     }
+
+    bool WriteText(const char *path, const char *text)
+    {
+        FILE *file = fopen(path, "wb");
+        if (!file)
+            return false;
+        fputs(text, file);
+        fclose(file);
+        return true;
+    }
+
+    // Load String reads the Wii version of a text the port installs in the
+    // Wii folder next to the game, and the game's own text otherwise.
+    void TestLoadStringPortFile(CKContext *context)
+    {
+        XString dir = VxWiiGetApplicationPath();
+        XString text = dir;
+        text << "Text";
+        XString wii = dir;
+        wii << "Wii";
+        XString wiiText = wii;
+        wiiText << "/Text";
+        VxMakeDirectory(text.CStr());
+        VxMakeDirectory(wii.CStr());
+        VxMakeDirectory(wiiText.CStr());
+        XString game = text;
+        game << "/wiiporttest.txt";
+        XString port = wiiText;
+        port << "/wiiporttest.txt";
+        XString gameOnly = text;
+        gameOnly << "/wiiporttest2.txt";
+        if (!WT_CHECK(WriteText(game.CStr(), "PC") && WriteText(port.CStr(), "Wii") &&
+                          WriteText(gameOnly.CStr(), "PC only"),
+                      "write test texts in %s", dir.CStr()))
+            return;
+
+        CKBehavior *beh = (CKBehavior *)context->CreateObject(CKCID_BEHAVIOR, (CKSTRING) "WiiLoadString");
+        if (WT_CHECK(beh->InitFromGuid(kLoadStringGuid) == CK_OK, "Load String prototype"))
+        {
+            const char *names[2] = {"Text\\wiiporttest.txt", "Text\\wiiporttest2.txt"};
+            const char *expected[2] = {"Wii", "PC only"};
+            for (int i = 0; i < 2; ++i)
+            {
+                SetInput(context, beh->GetInputParameter(0), names[i], (int)strlen(names[i]) + 1);
+                beh->ActivateInput(0);
+                beh->Execute(0.0f);
+                CKParameterOut *output = beh->GetOutputParameter(0);
+                const char *loaded = output ? (const char *)output->GetReadDataPtr() : NULL;
+                WT_CHECK(loaded && strcmp(loaded, expected[i]) == 0, "%s loaded \"%s\", expected \"%s\"", names[i],
+                         loaded ? loaded : "(null)", expected[i]);
+            }
+        }
+        context->DestroyObject(beh);
+        remove(game.CStr());
+        remove(port.CStr());
+        remove(gameOnly.CStr());
+    }
 }
 
 void RunBehaviorTests(CKContext *context)
@@ -105,6 +165,7 @@ void RunBehaviorTests(CKContext *context)
     {
         TestCombineTexture(context);
         TestTextureSineLoad(context);
+        TestLoadStringPortFile(context);
     }
     wiitest::EndSuite();
 }

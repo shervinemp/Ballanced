@@ -329,6 +329,14 @@ function(ballance_wii_port_building_blocks)
             FILES TT_Toolbox_RT/Behaviors/InputString.cpp Controllers/Behaviors/EditString.cpp
             TARGETS TT_Toolbox_RTStatic ControllersStatic
     )
+    # Texts the game loads, such as the tutorial naming PC keys, come from the
+    # Wii versions installed with the port when there are any.
+    ballance_wii_patch(PortFiles
+            ROOT "${_root}"
+            PATCH "${BALLANCE_WII_PATCH_DIR}/BuildingBlocks/port-files.patch"
+            FILES Logics/Behaviors/LoadString.cpp
+            TARGETS LogicsStatic
+    )
     # The game swaps in its small sounds when memory is short, as it always is
     # on the Wii, by finding its "\Sounds\" path: compare paths whatever their
     # separators, case or "." segments.

@@ -331,6 +331,8 @@ apps/ballance/
   Textures/
   Fonts/          Roboto, standing in for Windows fonts; add TrueType fonts
                   (e.g. Arial) to match the PC game's text exactly
+  Wii/Text/       tutorial texts naming the Wii controls, read instead of the
+                  game's own (installed with boot.dol)
 ```
 
 Start it from the Homebrew Channel. The game runs from the folder `boot.dol` was started from, on an SD card or a USB drive; when the loader passes no path it looks for `apps/ballance/` or `ballance/` on either device. `Player.ini` and `Player.log` are written to that folder, and so are the game's settings and high scores (`Database.tdb`, `registry.ini`).
@@ -343,7 +345,8 @@ Start it from the Homebrew Channel. The game runs from the folder `boot.dol` was
 | Turn the camera | 1 | Z | Y, L, ZL / Y, L, Z |
 | Overhead camera | 2 | C | X, R, ZR / X, R |
 | Confirm | A | A | A |
-| Back, pause | + or - | +, - or B | B, +, - / B, Start |
+| Back, pause | + | + or B | B or + / B or Start |
+| Skip the tutorial (first page) | - | - | - / none |
 
 Where the game uses the mouse, pointing the Wii Remote at the screen shows a pointer and A clicks; elsewhere A confirms like Enter, so menus made for the keyboard still work while pointing. A USB keyboard works as on a PC.
 

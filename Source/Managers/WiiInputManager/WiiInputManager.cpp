@@ -16,6 +16,7 @@
 enum
 {
     DIK_ESCAPE = 0x01,
+    DIK_Q = 0x10, // Skips the tutorial.
     DIK_RETURN = 0x1C,
     DIK_LSHIFT = 0x2A,
     DIK_SPACE = 0x39,
@@ -491,7 +492,8 @@ void WiiInputManager::PollControllers(CKBYTE wanted[WII_KEYBOARD_SIZE], CKDWORD 
                 Press(wanted, DIK_LSHIFT, held & (WPAD_BUTTON_1 | WPAD_BUTTON_B));
                 Press(wanted, DIK_SPACE, held & WPAD_BUTTON_2);
                 Press(wanted, DIK_RETURN, held & WPAD_BUTTON_A);
-                Press(wanted, DIK_ESCAPE, held & (WPAD_BUTTON_PLUS | WPAD_BUTTON_MINUS));
+                Press(wanted, DIK_ESCAPE, held & WPAD_BUTTON_PLUS);
+                Press(wanted, DIK_Q, held & WPAD_BUTTON_MINUS);
             }
             else
             {
@@ -502,7 +504,8 @@ void WiiInputManager::PollControllers(CKBYTE wanted[WII_KEYBOARD_SIZE], CKDWORD 
                 Press(wanted, DIK_RIGHT, held & WPAD_BUTTON_RIGHT);
                 Press(wanted, DIK_LSHIFT, held & WPAD_BUTTON_1);
                 Press(wanted, DIK_SPACE, held & WPAD_BUTTON_2);
-                Press(wanted, DIK_ESCAPE, held & (WPAD_BUTTON_PLUS | WPAD_BUTTON_MINUS | WPAD_BUTTON_B));
+                Press(wanted, DIK_ESCAPE, held & (WPAD_BUTTON_PLUS | WPAD_BUTTON_B));
+                Press(wanted, DIK_Q, held & WPAD_BUTTON_MINUS);
                 // A clicks what the pointer is on while the game reads the mouse
                 // buttons; otherwise, and off screen, it confirms like Enter.
                 if (pointing && MouseButtonsInUse())
@@ -554,7 +557,8 @@ void WiiInputManager::PollControllers(CKBYTE wanted[WII_KEYBOARD_SIZE], CKDWORD 
                     Press(wanted, DIK_LEFT, held & WPAD_CLASSIC_BUTTON_LEFT);
                     Press(wanted, DIK_RIGHT, held & WPAD_CLASSIC_BUTTON_RIGHT);
                     Press(wanted, DIK_RETURN, held & WPAD_CLASSIC_BUTTON_A);
-                    Press(wanted, DIK_ESCAPE, held & (WPAD_CLASSIC_BUTTON_B | WPAD_CLASSIC_BUTTON_PLUS | WPAD_CLASSIC_BUTTON_MINUS));
+                    Press(wanted, DIK_ESCAPE, held & (WPAD_CLASSIC_BUTTON_B | WPAD_CLASSIC_BUTTON_PLUS));
+                    Press(wanted, DIK_Q, held & WPAD_CLASSIC_BUTTON_MINUS);
                     Press(wanted, DIK_LSHIFT, held & (WPAD_CLASSIC_BUTTON_Y | WPAD_CLASSIC_BUTTON_ZL | WPAD_CLASSIC_BUTTON_FULL_L));
                     Press(wanted, DIK_SPACE, held & (WPAD_CLASSIC_BUTTON_X | WPAD_CLASSIC_BUTTON_ZR | WPAD_CLASSIC_BUTTON_FULL_R));
                 }

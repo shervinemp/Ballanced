@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -358,6 +359,28 @@ XBOOL VxDeleteDirectory(const char *path) {
 XBOOL VxFileExists(const char *path) {
     struct stat st;
     return path && stat(VxNormalizePath(path).CStr(), &st) == 0 && S_ISREG(st.st_mode);
+}
+
+XBOOL VxWiiFindPortFile(XString &file) {
+    XString relative = VxNormalizePath(file.CStr());
+    if (relative.Length() == 0)
+        return FALSE;
+    const int appLength = g_ApplicationPath.Length();
+    if (appLength > 0 && relative.Length() > appLength &&
+        strncasecmp(relative.CStr(), g_ApplicationPath.CStr(), appLength) == 0) {
+        relative = relative.Substring(appLength);
+    } else if (strchr(relative.CStr(), ':') || relative[0] == '/') {
+        return FALSE; // Outside the game folder.
+    }
+    while (relative.Length() > 2 && relative[0] == '.' && relative[1] == '/')
+        relative = relative.Substring(2);
+
+    XString candidate = g_ApplicationPath;
+    candidate << "Wii/" << relative;
+    if (!VxFileExists(candidate.CStr()))
+        return FALSE;
+    file = candidate;
+    return TRUE;
 }
 
 XBOOL VxDirectoryExists(const char *path) {

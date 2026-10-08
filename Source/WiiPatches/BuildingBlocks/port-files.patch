@@ -1,0 +1,25 @@
+diff --git a/Logics/Behaviors/LoadString.cpp b/Logics/Behaviors/LoadString.cpp
+index dbfc155..8e98bee 100644
+--- a/Logics/Behaviors/LoadString.cpp
++++ b/Logics/Behaviors/LoadString.cpp
+@@ -6,6 +6,9 @@
+ /////////////////////////////////////////////////////
+ /////////////////////////////////////////////////////
+ #include "CKAll.h"
++#if defined(GEKKO)
++#include "VxWiiPlatform.h"
++#endif
+ 
+ CKObjectDeclaration *FillBehaviorLoadStringDecl();
+ CKERROR CreateLoadStringProto(CKBehaviorPrototype **);
+@@ -66,6 +69,10 @@ int LoadString(const CKBehaviorContext &behcontext)
+     CKSTRING string = (CKSTRING)beh->GetInputParameterReadDataPtr(0);
+     XString filename(string);
+     behcontext.Context->GetPathManager()->ResolveFileName(filename, DATA_PATH_IDX, -1);
++#if defined(GEKKO)
++    // Texts that name PC keys have Wii versions installed with the port.
++    VxWiiFindPortFile(filename);
++#endif
+ 
+     FILE *file = fopen(filename.Str(), "r");
+     if (file)

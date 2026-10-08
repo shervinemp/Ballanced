@@ -1,0 +1,42 @@
+Einführung in das Spiel:
+Mit + können Sie das Spiel jederzeit anhalten oder verlassen.
+Mit A setzen Sie die Einführung fort, mit - überspringen Sie sie.
+*Drehen der Ansicht:
+Halten Sie 1 (Nunchuk: Z) gedrückt und drücken Sie dabei links oder rechts, um die Ansicht in 90-Grad-Schritten zu drehen.
+
+Weiter mit A ...
+*Anheben der Ansicht:
+Für einen besseren Überblick halten Sie 2 (Nunchuk: C) gedrückt.
+
+Weiter mit A ...
+*Navigation:
+Drehen Sie nun die Ansicht, bis der Weg mit den beiden Türmen vor Ihnen liegt.
+Mit dem Steuerkreuz (Nunchuk: Control Stick) rollen Sie den Ball vorwärts, rückwärts, nach links und nach rechts, ohne dabei 1 zu halten.
+
+Folgen Sie dem Weg!
+*Extra-Leben:
+Wenn Sie herunterfallen, verlieren Sie ein Leben. Wie viele Leben Ihnen bleiben, sehen Sie unten rechts.
+Mit einem Lebens-Extra gewinnen Sie ein weiteres Leben hinzu.
+
+Weiter mit A ...
+*Trafos:
+Trafos verwandeln das Material Ihres Balls. Welches Material Sie erhalten, erkennen Sie an der Oberfläche des Trafo-Feldes. Dies ist ein Stein-Trafo.
+
+Weiter mit A ...
+*Diese Steigung ist zu steil für einen Steinball!
+Suchen Sie einen Holz-Trafo und versuchen Sie es dann noch einmal.
+Tipp: Drehen Sie ab und zu die Ansicht (1 + links/rechts), um sich zu orientieren. Vorsicht beim Rückwärtsrollen!
+
+Weiter mit A ...
+*Punkte-Extra:
+Links sehen Sie Ihre Zeitpunkte, die während des Spiels ständig sinken. Mit einem Punkte-Extra erhöhen Sie Ihren Punktestand.
+
+Weiter mit A ...
+*Checkpoints:
+Dies ist der erste Checkpoint auf Ihrem Weg. Wenn Sie ein Leben verlieren, geht es am zuletzt erreichten Checkpoint weiter.
+
+Weiter mit A ...
+*Zum Schluss:
+Mit HOME öffnen Sie jederzeit das HOME-Menü. Von dort kehren Sie zum Homebrew Channel oder zum Wii-Menü zurück.
+
+Einführung beenden mit A ...
