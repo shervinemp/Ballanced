@@ -9,6 +9,7 @@
 
 #include "CKAll.h"
 #include "VxWiiPlatform.h"
+#include "WiiInputManager.h"
 #include "WiiKeyBindings.h"
 #include "WiiScreenKeyboard.h"
 #include "WiiSystem.h"
@@ -316,6 +317,48 @@ namespace
                  bindings.GetKey(WiiKeyBindings::FORWARD));
     }
 
+    // Frames as the engine runs them; the game asks about keys and reads the
+    // mouse between PreProcess and PostProcess.
+    void Frames(WiiInputManager *input, int count, CKDWORD askKey = 0, bool readMouse = false)
+    {
+        for (int i = 0; i < count; ++i)
+        {
+            input->PreProcess();
+            if (askKey)
+                input->IsKeyDown(askKey);
+            if (readMouse)
+                input->IsMouseButtonDown(CK_MOUSEBUTTON_LEFT);
+            input->PostProcess();
+        }
+    }
+
+    // Tilt and the D-Pad camera apply while the game plays: it asks about the
+    // camera keys, through short gaps, and not while a menu reads the mouse.
+    void TestPlayState(CKContext *context)
+    {
+        WiiInputManager *input = (WiiInputManager *)context->GetManagerByGuid(INPUT_MANAGER_GUID);
+        if (!WT_CHECK(input != NULL, "input manager"))
+            return;
+        Frames(input, 200);
+        WT_CHECK(!input->IsGamePlaying(), "playing without the game asking about keys");
+        Frames(input, 2, kShift);
+        Frames(input, 1);
+        WT_CHECK(input->IsGamePlaying(), "not playing while the game asks about Shift");
+        Frames(input, 100);
+        WT_CHECK(input->IsGamePlaying(), "play stopped in a short gap");
+        Frames(input, 100);
+        WT_CHECK(!input->IsGamePlaying(), "still playing long after the last question");
+        Frames(input, 2, kSpace);
+        Frames(input, 1);
+        WT_CHECK(input->IsGamePlaying(), "not playing while the game asks about Space");
+        Frames(input, 2, kShift, true);
+        Frames(input, 1, kShift);
+        WT_CHECK(!input->IsGamePlaying(), "playing while a menu reads the mouse");
+        Frames(input, 40, kShift);
+        WT_CHECK(input->IsGamePlaying(), "not playing once the menu has gone");
+        Frames(input, 200);
+    }
+
     // A sideways Wii Remote's reading with its far edge tipped down by
     // forward degrees and its right end by right degrees. Its left side (+x)
     // faces the player and its expansion end (+y) is on the right.
@@ -417,7 +460,10 @@ void RunInputTests(CKContext *context)
 
     wiitest::BeginSuite("Key bindings and tilt");
     if (context)
+    {
         TestKeyBindings(context);
+        TestPlayState(context);
+    }
     TestTilt();
     wiitest::EndSuite();
 }

@@ -30,8 +30,10 @@
  *                              L/Y/Z = Shift, R/X = Space, +/Start = Esc
  *   USB keyboard               keys as on a PC
  *
- * In the game's menus the D-Pad moves through them as arrows. With tilt
- * turned off in Player.ini, the sideways D-Pad rolls the ball instead.
+ * The game plays (rather than showing a menu or loading) while it asks about
+ * the camera keys; only then do tilt and the D-Pad camera apply, and in the
+ * menus the D-Pad moves through them as arrows. With tilt turned off in
+ * Player.ini, the sideways D-Pad rolls the ball instead.
  *
  * The arrows, Shift and Space stand for the game's controls: when Options >
  * Controls binds other keys to them, the controllers press those instead.
@@ -87,6 +89,9 @@ public:
     VXCURSOR_POINTER GetSystemCursor() override;
     void SetSystemCursor(VXCURSOR_POINTER cursor) override;
 
+    // The game plays and listens for its camera keys (for the tests).
+    CKBOOL IsGamePlaying() const { return m_InPlay; }
+
     CKERROR OnCKInit() override;
     CKERROR OnCKEnd() override;
     CKERROR OnCKReset() override;
@@ -123,6 +128,8 @@ private:
     void PollControllers(CKBYTE wanted[WII_KEYBOARD_SIZE], CKDWORD now);
     void PollPointer();
     CKBOOL MouseButtonsInUse() const;
+    CKBOOL KeyAskedWithin(CKDWORD key, CKDWORD frames) const;
+    void UpdatePlayState();
     void UpdateScreenKeyboard(CKDWORD now);
     void ReleaseTypedKeys(CKDWORD now);
     void PressKey(CKDWORD key, CKDWORD now);
@@ -149,6 +156,9 @@ private:
     CKBOOL m_PointerOnScreen;
     CKDWORD m_Frame;            // PreProcess calls
     CKDWORD m_MouseButtonsRead; // Frame the game last read the mouse buttons
+    CKDWORD m_KeyAsked[WII_KEYBOARD_SIZE]; // Frame the game last asked about each key
+    CKBOOL m_InPlay;            // The game asks about its camera keys
+    CKBOOL m_BallInPlay;        // ... and about the keys that roll the ball
     int m_PointerChannel;
 
     CKBOOL m_TextInput;
@@ -159,7 +169,7 @@ private:
 
     WiiKeyBindings m_KeyBindings;
     WiiTilt m_Tilt[WII_JOYSTICK_COUNT];
-    bool m_Tilting[WII_JOYSTICK_COUNT]; // In play with tilt last frame
+    bool m_Tilting[WII_JOYSTICK_COUNT]; // Tilt was in play last frame
 
     Joystick m_Joysticks[WII_JOYSTICK_COUNT];
     int m_ControllersConnected;

@@ -30,6 +30,12 @@ namespace
 {
     const float kStickThreshold = 0.5f;
 
+    // The game asks about the keys it waits for every frame. Play starts when
+    // it asks about the camera keys and lasts through pauses in the asking
+    // (a lost ball, a tutorial page) of up to three seconds.
+    const CKDWORD kAskFrames = 10;
+    const CKDWORD kPlayFrames = 180;
+
     // Milliseconds since startup. The time base counts from 2000, which would
     // not fit the key stamps: key repetition keeps their sign bit free.
     CKDWORD Milliseconds()
@@ -170,6 +176,7 @@ WiiInputManager::WiiInputManager(CKContext *context) : CKInputManager(context, (
     m_TextInput = FALSE;
     m_Frame = 0;
     m_MouseButtonsRead = 0;
+    memset(m_KeyAsked, 0, sizeof(m_KeyAsked));
     memset(&m_KeyboardControls, 0, sizeof(m_KeyboardControls));
     m_TypedCount = 0;
     m_Paused = FALSE;
@@ -198,6 +205,8 @@ void WiiInputManager::ClearState()
     m_MouseDelta.Set(0.0f, 0.0f, 0.0f);
     memset(m_Joysticks, 0, sizeof(m_Joysticks));
     memset(m_Tilting, 0, sizeof(m_Tilting));
+    m_InPlay = FALSE;
+    m_BallInPlay = FALSE;
 }
 
 // ---------------------------------------------------------------------------
@@ -278,10 +287,12 @@ CKERROR WiiInputManager::PreProcess()
 
     PollUsbKeyboard(now);
 
+    m_KeyBindings.Update(m_Context);
+    UpdatePlayState();
+
     CKBYTE wanted[WII_KEYBOARD_SIZE];
     memset(wanted, 0, sizeof(wanted));
     PollControllers(wanted, now);
-    m_KeyBindings.Update(m_Context);
     m_KeyBindings.Apply(wanted);
 
     for (CKDWORD key = 0; key < WII_KEYBOARD_SIZE; ++key)
@@ -514,11 +525,10 @@ void WiiInputManager::PollControllers(CKBYTE wanted[WII_KEYBOARD_SIZE], CKDWORD 
                 Press(wanted, DIK_ESCAPE, held & WPAD_BUTTON_PLUS);
                 Press(wanted, DIK_Q, held & WPAD_BUTTON_MINUS);
 
-                // While the game plays (not in its menus), tilt rolls the ball
-                // and the D-Pad works the camera; down takes the way the
-                // remote is held as level. Level is also taken afresh each
-                // time play starts or resumes.
-                tilting = wiisystem::GetTiltControls() && !MouseButtonsInUse() && data &&
+                // While the game plays, tilt rolls the ball and the D-Pad works
+                // the camera; down takes the way the remote is held as level.
+                // Level is also taken afresh each time play starts or resumes.
+                tilting = wiisystem::GetTiltControls() && m_InPlay && data &&
                           (data->data_present & WPAD_DATA_ACCEL);
                 if (tilting)
                 {
@@ -527,8 +537,9 @@ void WiiInputManager::PollControllers(CKBYTE wanted[WII_KEYBOARD_SIZE], CKDWORD 
                     int right, forward;
                     m_Tilt[chan].Update(data->gforce.x, data->gforce.y, data->gforce.z, &right, &forward);
                     Camera(wanted, padLeft, padRight, padUp);
-                    // Turning the view takes the arrows for a moment.
-                    if (!padLeft && !padRight)
+                    // The ball rolls while the game listens for it; turning the
+                    // view takes the arrows for a moment.
+                    if (m_BallInPlay && !padLeft && !padRight)
                     {
                         Press(wanted, DIK_UP, forward > 0);
                         Press(wanted, DIK_DOWN, forward < 0);
@@ -549,7 +560,7 @@ void WiiInputManager::PollControllers(CKBYTE wanted[WII_KEYBOARD_SIZE], CKDWORD 
                 // Upright (pointing, or with an expansion in the other hand).
                 // With a Nunchuk the stick rolls the ball, so while the game
                 // plays the D-Pad works the camera.
-                if (expansion == WPAD_EXP_NUNCHUK && !MouseButtonsInUse())
+                if (expansion == WPAD_EXP_NUNCHUK && m_InPlay)
                 {
                     Camera(wanted, held & WPAD_BUTTON_LEFT, held & WPAD_BUTTON_RIGHT, held & WPAD_BUTTON_UP);
                 }
@@ -748,6 +759,8 @@ CKBOOL WiiInputManager::IsKeyboardRepetitionEnabled()
 
 CKBOOL WiiInputManager::IsKeyDown(CKDWORD iKey, CKDWORD *oStamp)
 {
+    if (iKey < WII_KEYBOARD_SIZE)
+        m_KeyAsked[iKey] = m_Frame;
     if (iKey >= WII_KEYBOARD_SIZE || !(m_KeyboardState[iKey] & KS_PRESSED))
         return FALSE;
     if (oStamp)
@@ -757,11 +770,16 @@ CKBOOL WiiInputManager::IsKeyDown(CKDWORD iKey, CKDWORD *oStamp)
 
 CKBOOL WiiInputManager::IsKeyUp(CKDWORD iKey)
 {
-    return iKey < WII_KEYBOARD_SIZE && m_KeyboardState[iKey] == KS_IDLE;
+    if (iKey >= WII_KEYBOARD_SIZE)
+        return FALSE;
+    m_KeyAsked[iKey] = m_Frame;
+    return m_KeyboardState[iKey] == KS_IDLE;
 }
 
 CKBOOL WiiInputManager::IsKeyToggled(CKDWORD iKey, CKDWORD *oStamp)
 {
+    if (iKey < WII_KEYBOARD_SIZE)
+        m_KeyAsked[iKey] = m_Frame;
     if (iKey >= WII_KEYBOARD_SIZE || !(m_KeyboardState[iKey] & KS_RELEASED))
         return FALSE;
     if (oStamp)
@@ -824,6 +842,32 @@ static int MouseButtonIndex(CK_MOUSEBUTTON button)
 CKBOOL WiiInputManager::MouseButtonsInUse() const
 {
     return m_MouseButtonsRead != 0 && m_Frame - m_MouseButtonsRead <= 30;
+}
+
+CKBOOL WiiInputManager::KeyAskedWithin(CKDWORD key, CKDWORD frames) const
+{
+    return key < WII_KEYBOARD_SIZE && m_KeyAsked[key] != 0 && m_Frame - m_KeyAsked[key] <= frames;
+}
+
+// Menus read the mouse buttons and never ask about the camera keys, and
+// loading screens ask about nothing.
+void WiiInputManager::UpdatePlayState()
+{
+    const CKDWORD rotate = m_KeyBindings.GetKey(WiiKeyBindings::ROTATE_CAMERA);
+    const CKDWORD lift = m_KeyBindings.GetKey(WiiKeyBindings::LIFT_CAMERA);
+    if (MouseButtonsInUse())
+        m_InPlay = FALSE;
+    else if (KeyAskedWithin(rotate, kAskFrames) || KeyAskedWithin(lift, kAskFrames))
+        m_InPlay = TRUE;
+    else if (!KeyAskedWithin(rotate, kPlayFrames) && !KeyAskedWithin(lift, kPlayFrames))
+        m_InPlay = FALSE;
+
+    m_BallInPlay = FALSE;
+    for (int control = WiiKeyBindings::FORWARD; m_InPlay && control <= WiiKeyBindings::RIGHT; ++control)
+    {
+        if (KeyAskedWithin(m_KeyBindings.GetKey((WiiKeyBindings::Control)control), kAskFrames))
+            m_BallInPlay = TRUE;
+    }
 }
 
 CKBOOL WiiInputManager::IsMouseButtonDown(CK_MOUSEBUTTON iButton)
