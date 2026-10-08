@@ -1,0 +1,47 @@
+diff --git a/TT_Toolbox_RT/Behaviors/ReplacePath.cpp b/TT_Toolbox_RT/Behaviors/ReplacePath.cpp
+index fa91d83..40b0e97 100644
+--- a/TT_Toolbox_RT/Behaviors/ReplacePath.cpp
++++ b/TT_Toolbox_RT/Behaviors/ReplacePath.cpp
+@@ -49,6 +49,27 @@ CKERROR CreateReplacePathProto(CKBehaviorPrototype **pproto)
+     return CK_OK;
+ }
+ 
++// The script builds the path to look for from the game folder and a
++// Windows-style relative path ("\Sounds\"), while the player may have
++// registered it with other separators, case or "." segments.
++static XString ComparablePath(const char *path)
++{
++    XString result;
++    for (const char *p = path; p && *p; ++p)
++    {
++        const char c = (*p == '\\') ? '/' : (char)tolower((unsigned char)*p);
++        const bool segmentStart = p == path || p[-1] == '/' || p[-1] == '\\';
++        if (c == '.' && segmentStart && (p[1] == '/' || p[1] == '\\' || p[1] == '\0'))
++            continue;
++        if (c == '/' && result.Length() != 0 && result[result.Length() - 1] == '/')
++            continue;
++        result << c;
++    }
++    while (result.Length() > 1 && result[result.Length() - 1] == '/')
++        result.Crop(0, result.Length() - 1);
++    return result;
++}
++
+ int ReplacePath(const CKBehaviorContext &behcontext)
+ {
+     CKBehavior *beh = behcontext.Behavior;
+@@ -94,12 +115,13 @@ int ReplacePath(const CKBehaviorContext &behcontext)
+         return CKBR_OK;
+     }
+ 
++    const XString wanted = ComparablePath(path1.CStr());
+     XString pathName;
+     CKBOOL replaced = FALSE;
+     for (int pathIdx = 0; pathIdx < pathCount; ++pathIdx)
+     {
+         pm->GetPathName(catIdx, pathIdx, pathName);
+-        if (pathName == path1.CStr())
++        if (ComparablePath(pathName.CStr()) == wanted)
+         {
+             pathName = path2.CStr();
+             pm->RenamePath(catIdx, pathIdx, pathName);

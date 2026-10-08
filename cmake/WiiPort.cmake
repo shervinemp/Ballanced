@@ -317,6 +317,15 @@ function(ballance_wii_port_building_blocks)
             FILES TT_Toolbox_RT/Behaviors/InputString.cpp Controllers/Behaviors/EditString.cpp
             TARGETS TT_Toolbox_RTStatic ControllersStatic
     )
+    # The game swaps in its small sounds when memory is short, as it always is
+    # on the Wii, by finding its "\Sounds\" path: compare paths whatever their
+    # separators, case or "." segments.
+    ballance_wii_patch(ReplacePath
+            ROOT "${_root}"
+            PATCH "${BALLANCE_WII_PATCH_DIR}/BuildingBlocks/replace-path.patch"
+            FILES TT_Toolbox_RT/Behaviors/ReplacePath.cpp
+            TARGETS TT_Toolbox_RTStatic
+    )
     # Fonts: big-endian font manager chunks and atlas texels; with no system
     # fonts, TrueType fonts come from a Fonts folder next to the game, and font
     # indices from the PC's font list fall back to Arial or Roboto.
