@@ -341,12 +341,17 @@ Start it from the Homebrew Channel. The game runs from the folder `boot.dol` was
 
 | | Wii Remote sideways | Wii Remote + Nunchuk | Classic / GameCube controller |
 |---|---|---|---|
-| Roll the ball | D-Pad | Control Stick | Stick or D-Pad |
-| Turn the camera | 1 | Z | Y, L, ZL / Y, L, Z |
-| Overhead camera | 2 | C | X, R, ZR / X, R |
+| Roll the ball | Tilt | Control Stick | Stick or D-Pad |
+| Turn the view | D-Pad left or right | D-Pad left or right | Hold Y, L or ZL / Y, L or Z and press left or right |
+| Overhead camera | D-Pad up, or 2 | D-Pad up, or C | X, R, ZR / X, R |
+| Take the current hold as level | D-Pad down | | |
 | Confirm | A | A | A |
 | Back, pause | + | + or B | B or + / B or Start |
 | Skip the tutorial (first page) | - | - | - / none |
+
+Held sideways on its own, the Wii Remote is the floor the ball rolls on: tip its far edge down to roll forward and its right end down to roll right. Level is however the remote rests when play starts or resumes, so settle into a comfortable hold then; pressing down on the D-Pad, or pausing and resuming with +, takes the way it is held now as level. The first few degrees do nothing, about 20 degrees is full speed, and smaller tilts push more gently. In the menus the D-Pad moves through them as usual. With a Nunchuk, Classic Controller or GameCube controller there is no tilt. `TiltControls = 0` under `[Wii]` in `Player.ini` turns it off for a lone Wii Remote as well; its D-Pad then rolls the ball, and holding 1 while pressing left or right turns the view.
+
+The controllers follow the keys chosen in Options > Controls, including those in a `Database.tdb` brought over from a PC: rolling and the two camera buttons press whatever keys the game has bound, and the D-Pad still moves through the menus.
 
 Where the game uses the mouse, pointing the Wii Remote at the screen shows a pointer and A clicks; elsewhere A confirms like Enter, so menus made for the keyboard still work while pointing. A USB keyboard works as on a PC.
 

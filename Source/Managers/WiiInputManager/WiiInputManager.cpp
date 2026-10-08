@@ -122,6 +122,19 @@ namespace
             wanted[key] = 1;
     }
 
+    // The D-Pad as camera controls, when something else rolls the ball: left
+    // and right turn the view as Shift with an arrow does, up raises it as
+    // Space does.
+    void Camera(CKBYTE wanted[WII_KEYBOARD_SIZE], bool turnLeft, bool turnRight, bool raise)
+    {
+        if (turnLeft != turnRight)
+        {
+            wanted[DIK_LSHIFT] = 1;
+            wanted[turnLeft ? DIK_LEFT : DIK_RIGHT] = 1;
+        }
+        Press(wanted, DIK_SPACE, raise);
+    }
+
     // A held direction for the screen keyboard; the first one found wins.
     void Move(WiiScreenKeyboard::Controls &controls, int x, int y)
     {
@@ -184,6 +197,7 @@ void WiiInputManager::ClearState()
     memset(m_LastMouseButtons, 0, sizeof(m_LastMouseButtons));
     m_MouseDelta.Set(0.0f, 0.0f, 0.0f);
     memset(m_Joysticks, 0, sizeof(m_Joysticks));
+    memset(m_Tilting, 0, sizeof(m_Tilting));
 }
 
 // ---------------------------------------------------------------------------
@@ -226,8 +240,9 @@ CKERROR WiiInputManager::OnCKReset()
 
 CKERROR WiiInputManager::OnCKPlay()
 {
-    // Keys held across a pause must be pressed again.
+    // Keys held across a pause must be pressed again, and tilt starts level.
     memset(m_KeyboardState, 0, sizeof(m_KeyboardState));
+    memset(m_Tilting, 0, sizeof(m_Tilting));
     m_KeyBufferCount = 0;
     if (m_UsbKeyboardReady)
         KEYBOARD_FlushEvents();
@@ -266,6 +281,8 @@ CKERROR WiiInputManager::PreProcess()
     CKBYTE wanted[WII_KEYBOARD_SIZE];
     memset(wanted, 0, sizeof(wanted));
     PollControllers(wanted, now);
+    m_KeyBindings.Update(m_Context);
+    m_KeyBindings.Apply(wanted);
 
     for (CKDWORD key = 0; key < WII_KEYBOARD_SIZE; ++key)
     {
@@ -444,6 +461,7 @@ void WiiInputManager::PollControllers(CKBYTE wanted[WII_KEYBOARD_SIZE], CKDWORD 
     {
         Joystick &joystick = m_Joysticks[chan];
         memset(&joystick, 0, sizeof(joystick));
+        bool tilting = false;
 
         u32 type = 0;
         if (WPAD_Probe(chan, &type) == WPAD_ERR_NONE)
@@ -484,24 +502,64 @@ void WiiInputManager::PollControllers(CKBYTE wanted[WII_KEYBOARD_SIZE], CKDWORD 
             }
             else if (expansion == WPAD_EXP_NONE && !pointing)
             {
-                // Held sideways: the D-Pad turns with the remote.
-                Press(wanted, DIK_UP, held & WPAD_BUTTON_RIGHT);
-                Press(wanted, DIK_DOWN, held & WPAD_BUTTON_LEFT);
-                Press(wanted, DIK_LEFT, held & WPAD_BUTTON_UP);
-                Press(wanted, DIK_RIGHT, held & WPAD_BUTTON_DOWN);
+                // Held sideways: the D-Pad turns with the remote, so its up
+                // button points left, its right button up, and so on.
+                const bool padUp = held & WPAD_BUTTON_RIGHT;
+                const bool padDown = held & WPAD_BUTTON_LEFT;
+                const bool padLeft = held & WPAD_BUTTON_UP;
+                const bool padRight = held & WPAD_BUTTON_DOWN;
                 Press(wanted, DIK_LSHIFT, held & (WPAD_BUTTON_1 | WPAD_BUTTON_B));
                 Press(wanted, DIK_SPACE, held & WPAD_BUTTON_2);
                 Press(wanted, DIK_RETURN, held & WPAD_BUTTON_A);
                 Press(wanted, DIK_ESCAPE, held & WPAD_BUTTON_PLUS);
                 Press(wanted, DIK_Q, held & WPAD_BUTTON_MINUS);
+
+                // While the game plays (not in its menus), tilt rolls the ball
+                // and the D-Pad works the camera; down takes the way the
+                // remote is held as level. Level is also taken afresh each
+                // time play starts or resumes.
+                tilting = wiisystem::GetTiltControls() && !MouseButtonsInUse() && data &&
+                          (data->data_present & WPAD_DATA_ACCEL);
+                if (tilting)
+                {
+                    if (!m_Tilting[chan] || (down & WPAD_BUTTON_LEFT))
+                        m_Tilt[chan].Recenter();
+                    int right, forward;
+                    m_Tilt[chan].Update(data->gforce.x, data->gforce.y, data->gforce.z, &right, &forward);
+                    Camera(wanted, padLeft, padRight, padUp);
+                    // Turning the view takes the arrows for a moment.
+                    if (!padLeft && !padRight)
+                    {
+                        Press(wanted, DIK_UP, forward > 0);
+                        Press(wanted, DIK_DOWN, forward < 0);
+                        Press(wanted, DIK_RIGHT, right > 0);
+                        Press(wanted, DIK_LEFT, right < 0);
+                    }
+                }
+                else
+                {
+                    Press(wanted, DIK_UP, padUp);
+                    Press(wanted, DIK_DOWN, padDown);
+                    Press(wanted, DIK_LEFT, padLeft);
+                    Press(wanted, DIK_RIGHT, padRight);
+                }
             }
             else
             {
                 // Upright (pointing, or with an expansion in the other hand).
-                Press(wanted, DIK_UP, held & WPAD_BUTTON_UP);
-                Press(wanted, DIK_DOWN, held & WPAD_BUTTON_DOWN);
-                Press(wanted, DIK_LEFT, held & WPAD_BUTTON_LEFT);
-                Press(wanted, DIK_RIGHT, held & WPAD_BUTTON_RIGHT);
+                // With a Nunchuk the stick rolls the ball, so while the game
+                // plays the D-Pad works the camera.
+                if (expansion == WPAD_EXP_NUNCHUK && !MouseButtonsInUse())
+                {
+                    Camera(wanted, held & WPAD_BUTTON_LEFT, held & WPAD_BUTTON_RIGHT, held & WPAD_BUTTON_UP);
+                }
+                else
+                {
+                    Press(wanted, DIK_UP, held & WPAD_BUTTON_UP);
+                    Press(wanted, DIK_DOWN, held & WPAD_BUTTON_DOWN);
+                    Press(wanted, DIK_LEFT, held & WPAD_BUTTON_LEFT);
+                    Press(wanted, DIK_RIGHT, held & WPAD_BUTTON_RIGHT);
+                }
                 Press(wanted, DIK_LSHIFT, held & WPAD_BUTTON_1);
                 Press(wanted, DIK_SPACE, held & WPAD_BUTTON_2);
                 Press(wanted, DIK_ESCAPE, held & (WPAD_BUTTON_PLUS | WPAD_BUTTON_B));
@@ -572,6 +630,8 @@ void WiiInputManager::PollControllers(CKBYTE wanted[WII_KEYBOARD_SIZE], CKDWORD 
                 joystick.Buttons = held >> 16;
             }
         }
+
+        m_Tilting[chan] = tilting;
 
         if (gamecubePads & (1u << chan))
         {

@@ -2,16 +2,16 @@ Game Tutorial:
 Press + at any time to pause or quit the game.
 Press A to continue the tutorial, or - to skip it.
 *View Rotation:
-Hold 1 (Nunchuk: Z) and press left or right to turn the view in 90° steps.
+Press left or right on the +Control Pad to turn the view in 90° steps.
 
 Continue with A ...
 *Overview:
-Hold 2 (Nunchuk: C) to raise the viewpoint.
+Hold up on the +Control Pad to raise the viewpoint.
 
 Continue with A ...
 *Navigation:
 Turn the view until the track with the two towers lies ahead of you.
-Roll the ball forward, back, left and right with the +Control Pad (Nunchuk: Control Stick), without holding 1.
+Tilt the Wii Remote, held sideways, to roll the ball (Nunchuk: Control Stick). Down on the +Control Pad makes the way you hold it level.
 
 Follow the path!
 *Extra Life:
@@ -24,7 +24,7 @@ Transformers change what your ball is made of. The surface of the transformer fi
 Continue with A ...
 *This slope is too steep for a stone ball!
 Find a wood transformer and try again.
-Tip: turn the view now and then (1 + left/right) to find your way. Careful when rolling backwards!
+Tip: turn the view now and then (left/right on the +Control Pad) to find your way. Careful when rolling backwards!
 
 Continue with A ...
 *Extra Points:

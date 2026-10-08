@@ -1,15 +1,18 @@
 // The on-screen keyboard that stands in for a PC keyboard when the game asks
-// for text (the high score name), the hook the text blocks use to ask, and
-// the HOME menu.
+// for text (the high score name), the hook the text blocks use to ask, the
+// HOME menu, the game's key bindings the controllers follow, and tilt.
 
 #include "TestFramework.h"
 
+#include <math.h>
 #include <string.h>
 
 #include "CKAll.h"
 #include "VxWiiPlatform.h"
+#include "WiiKeyBindings.h"
 #include "WiiScreenKeyboard.h"
 #include "WiiSystem.h"
+#include "WiiTilt.h"
 
 namespace
 {
@@ -224,6 +227,184 @@ namespace
     }
 }
 
+namespace
+{
+    // DirectInput scan codes.
+    const CKDWORD kUp = 0xC8, kDown = 0xD0, kLeft = 0xCB, kRight = 0xCD, kShift = 0x2A, kSpace = 0x39;
+    const CKDWORD kW = 0x11, kA = 0x1E, kS = 0x1F, kD = 0x20, kX = 0x2D;
+
+    // The game's "Keyboard" array: one key parameter for each control.
+    CKDataArray *CreateBindings(CKContext *context, const CKDWORD keys[WiiKeyBindings::CONTROL_COUNT])
+    {
+        static const char *kColumns[WiiKeyBindings::CONTROL_COUNT] = {"up", "down", "left", "right", "rotation", "camup"};
+        CKDataArray *array = (CKDataArray *)context->CreateObject(CKCID_DATAARRAY, (CKSTRING) "Keyboard");
+        for (int c = 0; c < WiiKeyBindings::CONTROL_COUNT; ++c)
+            array->InsertColumn(-1, CKARRAYTYPE_PARAMETER, (CKSTRING)kColumns[c], CKPGUID_KEY);
+        array->InsertRow(-1);
+        for (int c = 0; c < WiiKeyBindings::CONTROL_COUNT; ++c)
+        {
+            CKDWORD key = keys[c];
+            array->SetElementValue(0, c, &key, sizeof(key));
+        }
+        return array;
+    }
+
+    // The keys that come out of the bindings for the given pressed keys, in
+    // scan code order.
+    int Remap(const WiiKeyBindings &bindings, const CKDWORD *pressed, int count, CKDWORD out[8])
+    {
+        CKBYTE keys[256];
+        memset(keys, 0, sizeof(keys));
+        for (int i = 0; i < count; ++i)
+            keys[pressed[i]] = 1;
+        bindings.Apply(keys);
+        int n = 0;
+        for (int key = 0; key < 256 && n < 8; ++key)
+        {
+            if (keys[key])
+                out[n++] = (CKDWORD)key;
+        }
+        return n;
+    }
+
+    bool Same(const CKDWORD *actual, int count, const CKDWORD *expected, int expectedCount)
+    {
+        return count == expectedCount && memcmp(actual, expected, count * sizeof(CKDWORD)) == 0;
+    }
+
+    // A database from a PC can bind other keys; the controllers follow it.
+    void TestKeyBindings(CKContext *context)
+    {
+        WiiKeyBindings bindings;
+        bindings.Update(context);
+        WT_CHECK(bindings.GetKey(WiiKeyBindings::FORWARD) == kUp && bindings.GetKey(WiiKeyBindings::LIFT_CAMERA) == kSpace,
+                 "defaults without the game's array: %x %x", bindings.GetKey(WiiKeyBindings::FORWARD),
+                 bindings.GetKey(WiiKeyBindings::LIFT_CAMERA));
+        CKDWORD out[8];
+        const CKDWORD upShift[] = {kShift, kUp};
+        int n = Remap(bindings, upShift, 2, out);
+        WT_CHECK(Same(out, n, upShift, 2), "default bindings changed the keys");
+
+        const CKDWORD wasd[WiiKeyBindings::CONTROL_COUNT] = {kW, kS, kA, kD, kX, kSpace};
+        CKDataArray *array = CreateBindings(context, wasd);
+        bindings.Update(context);
+        WT_CHECK(bindings.GetKey(WiiKeyBindings::FORWARD) == kW && bindings.GetKey(WiiKeyBindings::RIGHT) == kD &&
+                     bindings.GetKey(WiiKeyBindings::ROTATE_CAMERA) == kX,
+                 "bindings read: %x %x %x", bindings.GetKey(WiiKeyBindings::FORWARD),
+                 bindings.GetKey(WiiKeyBindings::RIGHT), bindings.GetKey(WiiKeyBindings::ROTATE_CAMERA));
+        // Up rolls with W and still moves through the menus; Shift is free,
+        // so rotating the camera presses X and Shift.
+        n = Remap(bindings, upShift, 2, out);
+        const CKDWORD wasdOut[] = {kW, kShift, kX, kUp};
+        WT_CHECK(Same(out, n, wasdOut, 4), "WASD: %d keys, first %x", n, n > 0 ? out[0] : 0);
+
+        // Forward and backward swapped: Up is bound to backward, so it no
+        // longer stands for forward.
+        context->DestroyObject(array);
+        const CKDWORD swapped[WiiKeyBindings::CONTROL_COUNT] = {kDown, kUp, kLeft, kRight, kShift, kSpace};
+        array = CreateBindings(context, swapped);
+        bindings.Update(context);
+        const CKDWORD up[] = {kUp};
+        n = Remap(bindings, up, 1, out);
+        const CKDWORD down[] = {kDown};
+        WT_CHECK(Same(out, n, down, 1), "swapped: %d keys, first %x", n, n > 0 ? out[0] : 0);
+
+        // Gone again: back to the defaults.
+        context->DestroyObject(array);
+        bindings.Update(context);
+        WT_CHECK(bindings.GetKey(WiiKeyBindings::FORWARD) == kUp, "defaults after the array went away: %x",
+                 bindings.GetKey(WiiKeyBindings::FORWARD));
+    }
+
+    // A sideways Wii Remote's reading with its far edge tipped down by
+    // forward degrees and its right end by right degrees. Its left side (+x)
+    // faces the player and its expansion end (+y) is on the right.
+    void Reading(float forward, float right, float g, float out[3])
+    {
+        const float x = tanf(forward * (float)M_PI / 180.0f);
+        const float y = -tanf(right * (float)M_PI / 180.0f);
+        const float length = sqrtf(x * x + y * y + 1.0f);
+        out[0] = g * x / length;
+        out[1] = g * y / length;
+        out[2] = g / length;
+    }
+
+    // Feeds frames of one pose; counts the frames pressing each way.
+    void Hold(WiiTilt &tilt, float forward, float right, int frames, int *forwardFrames, int *rightFrames,
+              float g = 1.0f)
+    {
+        float r[3];
+        Reading(forward, right, g, r);
+        *forwardFrames = 0;
+        *rightFrames = 0;
+        for (int i = 0; i < frames; ++i)
+        {
+            int x, y;
+            tilt.Update(r[0], r[1], r[2], &x, &y);
+            *forwardFrames += y;
+            *rightFrames += x;
+        }
+    }
+
+    void TestTilt()
+    {
+        WiiTilt tilt;
+        int forward, right;
+        // Hands rest with the remote tipped 15 degrees towards the player:
+        // that is level, and does nothing.
+        Hold(tilt, -15.0f, 0.0f, 3, &forward, &right);
+        WT_CHECK(!tilt.IsCentered() && forward == 0 && right == 0, "rolled before taking level");
+        Hold(tilt, -15.0f, 0.0f, 60, &forward, &right);
+        WT_CHECK(tilt.IsCentered() && forward == 0 && right == 0, "level: centered %d, %d forward, %d right",
+                 (int)tilt.IsCentered(), forward, right);
+
+        // A few degrees off level is an unsteady hold.
+        Hold(tilt, -12.0f, -3.0f, 60, &forward, &right);
+        WT_CHECK(forward == 0 && right == 0, "dead zone: %d forward, %d right", forward, right);
+
+        // Past the full tilt the arrow is held every frame.
+        Hold(tilt, 10.0f, 0.0f, 20, &forward, &right);
+        Hold(tilt, 10.0f, 0.0f, 60, &forward, &right);
+        WT_CHECK(forward == 60 && right == 0, "full tilt forward: %d forward, %d right", forward, right);
+
+        // Halfway between the dead zone and full tilt, half the frames.
+        Hold(tilt, -15.0f, -12.0f, 20, &forward, &right);
+        Hold(tilt, -15.0f, -12.0f, 60, &forward, &right);
+        WT_CHECK(forward == 0 && right >= -32 && right <= -28, "half tilt left: %d forward, %d right", forward, right);
+
+        // A slight tilt starts pushing at once, then now and then.
+        Hold(tilt, -15.0f, 0.0f, 30, &forward, &right);
+        float r[3];
+        Reading(-15.0f, 7.0f, 1.0f, r);
+        int first = 0;
+        for (int i = 0; i < 30 && first == 0; ++i)
+        {
+            int x, y;
+            tilt.Update(r[0], r[1], r[2], &x, &y);
+            first = x;
+        }
+        WT_CHECK(first == 1, "slight tilt right never pushed");
+
+        // Shaking or swinging the remote does not count as tilt.
+        Hold(tilt, -15.0f, 0.0f, 30, &forward, &right);
+        Hold(tilt, 60.0f, 0.0f, 10, &forward, &right, 2.0f);
+        WT_CHECK(forward == 0 && right == 0, "shake: %d forward, %d right", forward, right);
+
+        // Recentering takes the new rest as level.
+        tilt.Recenter();
+        Hold(tilt, 5.0f, 0.0f, 60, &forward, &right);
+        WT_CHECK(tilt.IsCentered() && forward == 0, "after recentering: %d forward", forward);
+        Hold(tilt, -20.0f, 0.0f, 20, &forward, &right);
+        Hold(tilt, -20.0f, 0.0f, 60, &forward, &right);
+        WT_CHECK(forward == -60, "back from the new level: %d forward", forward);
+
+        // Held far over, on its side, is no way to rest it: level waits.
+        tilt.Recenter();
+        Hold(tilt, 0.0f, 70.0f, 60, &forward, &right);
+        WT_CHECK(!tilt.IsCentered() && right == 0, "took level on its side");
+    }
+}
+
 void RunInputTests(CKContext *context)
 {
     wiitest::BeginSuite("Screen keyboard and HOME menu");
@@ -232,5 +413,11 @@ void RunInputTests(CKContext *context)
     if (context)
         TestTextInputHook(context);
     TestHomeMenu();
+    wiitest::EndSuite();
+
+    wiitest::BeginSuite("Key bindings and tilt");
+    if (context)
+        TestKeyBindings(context);
+    TestTilt();
     wiitest::EndSuite();
 }

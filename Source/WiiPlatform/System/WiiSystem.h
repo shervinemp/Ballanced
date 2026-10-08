@@ -52,6 +52,11 @@ namespace wiisystem
     void OpenHomeMenu();
     bool UpdateHomeMenu();
 
+    // Tilt controls for a Wii Remote held sideways without a Nunchuk: on
+    // unless Player.ini turns them off. The input manager reads it every frame.
+    bool GetTiltControls();
+    void SetTiltControls(bool enabled);
+
     // Frame timing: the rasterizer adds how long each frame waited for the GPU
     // to finish and for the TV's vertical blank; the player takes the totals.
     void AddFrameWaits(u64 gpuTicks, u64 vsyncTicks);

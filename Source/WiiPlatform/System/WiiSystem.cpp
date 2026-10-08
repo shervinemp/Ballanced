@@ -25,6 +25,7 @@ namespace wiisystem
         char g_GamePath[256] = "";
         volatile QuitAction g_QuitRequest = QUIT_NONE;
         bool g_HomeMenuRequested = false;
+        bool g_TiltControls = true;
 
         // Where MEM2 started before the heap reached it: libogc's sbrk moves the
         // heap from MEM1 to MEM2 once MEM1 is used up, and never moves back.
@@ -259,6 +260,16 @@ namespace wiisystem
         const bool requested = g_HomeMenuRequested;
         g_HomeMenuRequested = false;
         return requested;
+    }
+
+    bool GetTiltControls()
+    {
+        return g_TiltControls;
+    }
+
+    void SetTiltControls(bool enabled)
+    {
+        g_TiltControls = enabled;
     }
 
     // ------------------------------------------------------------------

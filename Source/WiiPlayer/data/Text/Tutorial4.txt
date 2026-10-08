@@ -2,16 +2,16 @@ Introduzione al gioco:
 Premi + in qualsiasi momento per mettere in pausa o abbandonare il gioco.
 Premi A per continuare l'introduzione o - per saltarla.
 *Ruotare la visuale:
-Tieni premuto 1 (Nunchuk: Z) e premi a sinistra o a destra per ruotare la visuale di 90° alla volta.
+Premi la pulsantiera di comando a sinistra o a destra per ruotare la visuale di 90° alla volta.
 
 Continua con A ...
 *Panoramica:
-Tieni premuto 2 (Nunchuk: C) per alzare il punto di vista.
+Tieni premuta la pulsantiera di comando verso l'alto per alzare il punto di vista.
 
 Continua con A ...
 *Navigazione:
 Ruota la visuale finché il percorso con le due torri non si trova davanti a te.
-Muovi la palla avanti, indietro, a sinistra e a destra con la pulsantiera di comando (Nunchuk: levetta di controllo), senza tenere premuto 1.
+Inclina il telecomando Wii tenuto di lato per muovere la palla (Nunchuk: levetta di controllo). Pulsantiera giù: la tua posizione diventa orizzontale.
 
 Segui il percorso!
 *Vita extra:
@@ -24,7 +24,7 @@ I trasformatori cambiano il materiale della tua palla. La superficie del campo d
 Continua con A ...
 *Questa salita è troppo ripida per una palla di pietra!
 Cerca un trasformatore di legno e riprova.
-Suggerimento: ruota ogni tanto la visuale (1 + sinistra/destra) per orientarti. Attenzione quando rotoli all'indietro!
+Suggerimento: ruota ogni tanto la visuale (pulsantiera di comando sinistra/destra) per orientarti. Attenzione quando rotoli all'indietro!
 
 Continua con A ...
 *Punti extra:

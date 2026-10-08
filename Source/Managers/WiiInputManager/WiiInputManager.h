@@ -3,7 +3,9 @@
 
 #include "CKAll.h"
 
+#include "WiiKeyBindings.h"
 #include "WiiScreenKeyboard.h"
+#include "WiiTilt.h"
 
 #define WII_KEYBOARD_SIZE 256
 #define WII_KEY_BUFFER_SIZE 256
@@ -15,15 +17,24 @@
  * Ballance reads the keyboard (DirectInput scan codes) and the mouse, so the
  * Wii controllers are presented as a virtual keyboard and mouse:
  *
- *   Wii Remote held sideways   D-Pad = arrows, 1 = Shift (rotate camera),
- *                              2 = Space (overhead camera), + = Esc, A = Enter
+ *   Wii Remote held sideways   tilt = arrows (WiiTilt), D-Pad left/right =
+ *                              Shift + arrow (turn the view), D-Pad up = Space
+ *                              (overhead camera), D-Pad down = take the hold as
+ *                              level, 1 = Shift, 2 = Space, + = Esc, A = Enter
  *   Wii Remote pointing        pointer = mouse, A = click while the game reads the
  *                              mouse buttons (Enter otherwise and off screen),
  *                              B = Esc, D-Pad = arrows
- *   Nunchuk                    stick = arrows, Z = Shift, C = Space
+ *   Nunchuk                    stick = arrows, Z = Shift, C = Space, the remote's
+ *                              D-Pad left/right turns the view and up raises it
  *   Classic / GameCube pad     stick or D-Pad = arrows, A = Enter, B = Esc,
  *                              L/Y/Z = Shift, R/X = Space, +/Start = Esc
  *   USB keyboard               keys as on a PC
+ *
+ * In the game's menus the D-Pad moves through them as arrows. With tilt
+ * turned off in Player.ini, the sideways D-Pad rolls the ball instead.
+ *
+ * The arrows, Shift and Space stand for the game's controls: when Options >
+ * Controls binds other keys to them, the controllers press those instead.
  *
  * HOME opens the HOME menu (handled by the player).
  *
@@ -145,6 +156,10 @@ private:
     WiiScreenKeyboard::Controls m_KeyboardControls;
     CKDWORD m_TypedKeys[2]; // Held for one frame
     int m_TypedCount;
+
+    WiiKeyBindings m_KeyBindings;
+    WiiTilt m_Tilt[WII_JOYSTICK_COUNT];
+    bool m_Tilting[WII_JOYSTICK_COUNT]; // In play with tilt last frame
 
     Joystick m_Joysticks[WII_JOYSTICK_COUNT];
     int m_ControllersConnected;

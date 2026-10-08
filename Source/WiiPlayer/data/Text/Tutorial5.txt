@@ -2,16 +2,16 @@ Initiation au jeu:
 Appuyez sur + à tout moment pour mettre le jeu en pause ou le quitter.
 Appuyez sur A pour poursuivre l'initiation ou sur - pour la passer.
 *Rotation de la vue:
-Maintenez 1 (Nunchuk: Z) enfoncé et appuyez à gauche ou à droite pour faire pivoter la vue par paliers de 90°.
+Appuyez à gauche ou à droite sur la croix directionnelle pour faire pivoter la vue par paliers de 90°.
 
 Continuez avec A ...
 *Vue d'ensemble:
-Maintenez 2 (Nunchuk: C) enfoncé pour élever le point de vue.
+Maintenez la croix directionnelle vers le haut pour élever le point de vue.
 
 Continuez avec A ...
 *Navigation:
 Faites pivoter la vue jusqu'à ce que le chemin aux deux tours se trouve devant vous.
-Faites rouler la boule vers l'avant, l'arrière, la gauche et la droite avec la croix directionnelle (Nunchuk: stick), sans maintenir 1.
+Inclinez la télécommande Wii, tenue à l'horizontale, pour faire rouler la boule (Nunchuk: stick). Croix vers le bas: votre position devient l'horizontale.
 
 Suivez le chemin!
 *Vie supplémentaire:
@@ -24,7 +24,7 @@ Les transformateurs changent la matière de votre boule. La surface du transforma
 Continuez avec A ...
 *Cette pente est trop raide pour une boule de pierre!
 Cherchez un transformateur de bois et réessayez.
-Astuce: faites pivoter la vue de temps en temps (1 + gauche/droite) pour vous repérer. Attention en reculant!
+Astuce: faites pivoter la vue de temps en temps (croix directionnelle gauche/droite) pour vous repérer. Attention en reculant!
 
 Continuez avec A ...
 *Points supplémentaires:

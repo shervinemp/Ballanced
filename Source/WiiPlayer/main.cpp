@@ -44,6 +44,12 @@ int main(int argc, char **argv)
     // Player.ini can still choose another language.
     config.langId = ConsoleLanguage();
     config.LoadFromIni();
+    XString iniPath;
+    const bool haveIni = config.ResolvePath(eConfigPath, iniPath);
+    // Tilt controls are on unless Player.ini turns them off.
+    bool tilt = true;
+    if (haveIni && utils::IniGetBoolean("Wii", "TiltControls", tilt, iniPath.CStr()))
+        wiisystem::SetTiltControls(tilt);
     // The TV picture has one mode; desktop window settings do not apply.
     config.driver = 0;
     config.width = wiisystem::GetRenderWidth();
@@ -91,7 +97,8 @@ int main(int argc, char **argv)
         player.Shutdown();
     }
 
-    if (!config.SaveToIni())
+    if (!config.SaveToIni() ||
+        (haveIni && !utils::IniSetBoolean("Wii", "TiltControls", wiisystem::GetTiltControls(), iniPath.CStr())))
         CLogger::Get().Warn("Could not save Player.ini.");
     CLogger::Get().Close();
 

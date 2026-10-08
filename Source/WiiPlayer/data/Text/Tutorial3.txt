@@ -2,16 +2,16 @@ Introducción al juego:
 Pulsa + en cualquier momento para pausar o salir del juego.
 Pulsa A para continuar la introducción o - para saltarla.
 *Girar la vista:
-Mantén pulsado 1 (Nunchuk: Z) y pulsa a la izquierda o a la derecha para girar la vista en pasos de 90°.
+Pulsa el Botón de Control a la izquierda o a la derecha para girar la vista en pasos de 90°.
 
 Continúa con A ...
 *Vista general:
-Mantén pulsado 2 (Nunchuk: C) para elevar el punto de vista.
+Mantén pulsado el Botón de Control hacia arriba para elevar el punto de vista.
 
 Continúa con A ...
 *Navegación:
 Gira la vista hasta que el camino con las dos torres quede delante de ti.
-Mueve la bola hacia delante, hacia atrás, a la izquierda y a la derecha con el Botón de Control (Nunchuk: Palanca de Control), sin mantener pulsado 1.
+Inclina el mando de Wii, sujeto en horizontal, para mover la bola (Nunchuk: Palanca de Control). Botón de Control abajo: tu posición pasa a ser la horizontal.
 
 ¡Sigue el camino!
 *Vida extra:
@@ -24,7 +24,7 @@ Los transformadores cambian el material de tu bola. La superficie del campo del 
 Continúa con A ...
 *¡Esta pendiente es demasiado empinada para una bola de piedra!
 Busca un transformador de madera y vuelve a intentarlo.
-Consejo: gira la vista de vez en cuando (1 + izquierda/derecha) para orientarte. ¡Cuidado al rodar hacia atrás!
+Consejo: gira la vista de vez en cuando (Botón de Control izquierda/derecha) para orientarte. ¡Cuidado al rodar hacia atrás!
 
 Continúa con A ...
 *Puntos extra:
