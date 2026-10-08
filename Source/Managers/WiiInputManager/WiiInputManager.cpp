@@ -29,9 +29,12 @@ namespace
 {
     const float kStickThreshold = 0.5f;
 
+    // Milliseconds since startup. The time base counts from 2000, which would
+    // not fit the key stamps: key repetition keeps their sign bit free.
     CKDWORD Milliseconds()
     {
-        return (CKDWORD)ticks_to_millisecs(gettime());
+        static const u64 s_Start = gettime();
+        return (CKDWORD)ticks_to_millisecs(gettime() - s_Start);
     }
 
     // USB HID usage -> DirectInput scan code.
@@ -366,7 +369,9 @@ void WiiInputManager::RepeatKeys(CKDWORD now)
             m_KeyboardStamps[key] = (CKDWORD)(-(int)m_KeyboardStamps[key]);
         if ((int)m_KeyboardStamps[key] >= 0)
             continue;
-        for (int t = -(int)m_KeyboardStamps[key] - (int)m_RepeatDelay + (int)now; t > (int)m_RepeatInterval;)
+        // The stamp holds the negated press time, moved back an interval for
+        // each repeat sent: send the repeats due since the delay ran out.
+        for (int t = (int)now + (int)m_KeyboardStamps[key] - (int)m_RepeatDelay; t > (int)m_RepeatInterval;)
         {
             t -= m_RepeatInterval;
             m_KeyboardStamps[key] = (CKDWORD)((int)m_KeyboardStamps[key] - (int)m_RepeatInterval);
