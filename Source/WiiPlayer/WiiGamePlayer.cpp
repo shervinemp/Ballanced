@@ -45,6 +45,48 @@ namespace
         return strncasecmp(name, "CK2_3D", 6) == 0 && (name[6] == '\0' || name[6] == '.');
     }
 
+    // Logs the innermost running building blocks of a script, so a log shows
+    // where the composition waits.
+    void LogActiveBlocks(CKBehavior *beh, XString &path, int &budget)
+    {
+        const int length = path.Length();
+        if (length != 0)
+            path << " > ";
+        path << (beh->GetName() ? beh->GetName() : "?");
+        bool inner = false;
+        for (int i = 0; i < beh->GetSubBehaviorCount() && budget > 0; ++i)
+        {
+            CKBehavior *sub = beh->GetSubBehavior(i);
+            if (sub && sub->IsActive())
+            {
+                LogActiveBlocks(sub, path, budget);
+                inner = true;
+            }
+        }
+        if (!inner && budget > 0)
+        {
+            CLogger::Get().Debug("Running: %s", path.CStr());
+            --budget;
+        }
+        path.Crop(0, length);
+    }
+
+    void LogRunningBlocks(CKContext *context)
+    {
+        int budget = 40;
+        const int count = context->GetObjectsCountByClassID(CKCID_BEHAVIOR);
+        CK_ID *ids = context->GetObjectsListByClassID(CKCID_BEHAVIOR);
+        for (int i = 0; i < count && budget > 0; ++i)
+        {
+            CKBehavior *beh = (CKBehavior *)context->GetObject(ids[i]);
+            if (beh && (beh->GetType() & CKBEHAVIORTYPE_SCRIPT) && beh->IsActive())
+            {
+                XString path;
+                LogActiveBlocks(beh, path, budget);
+            }
+        }
+    }
+
     int FindRenderEngine(CKPluginManager *pluginManager)
     {
         const int count = pluginManager->GetPluginCount(CKPLUGIN_RENDERENGINE_DLL);
@@ -424,6 +466,9 @@ void WiiGamePlayer::LogPerformance()
     m_LastReport = now;
     m_ReportFrame = m_FrameCount;
     LogMemory("while playing");
+
+    if (m_Config.verbose)
+        LogRunningBlocks(m_CKContext);
 }
 
 void WiiGamePlayer::OpenHomeMenu()
