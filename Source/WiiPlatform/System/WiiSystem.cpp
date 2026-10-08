@@ -541,8 +541,14 @@ namespace wiisystem
         const u32 arena2 = (u32)SYS_GetArena2Hi() - (u32)SYS_GetArena2Lo();
         const bool inMem2 = g_Arena2Start && SYS_GetArena2Lo() != g_Arena2Start;
         const u32 arena1 = inMem2 ? 0 : (u32)SYS_GetArena1Hi() - (u32)SYS_GetArena1Lo();
+        // When the heap moves on to MEM2, malloc counts the addresses it
+        // jumped over, from the end of the heap in MEM1, as memory in use.
+        u32 inUse = (u32)info.uordblks;
+        const u32 gap = inMem2 ? (u32)g_Arena2Start - (u32)SYS_GetArena1Lo() : 0;
+        if (inUse > gap)
+            inUse -= gap;
         if (used)
-            *used = (u32)info.uordblks;
+            *used = inUse;
         if (available)
             *available = (u32)info.fordblks + arena1 + arena2;
     }
