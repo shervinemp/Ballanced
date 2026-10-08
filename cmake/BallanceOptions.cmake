@@ -91,6 +91,7 @@ ballance_set_cache_default(CKPLUGINS_BUILD_TESTS OFF BOOL "")
 foreach (_mgr IN ITEMS SDLINPUT SDLSOUND CKPARAMOP)
     ballance_set_cache_default(${_mgr}_INSTALL ON BOOL "")
 endforeach ()
+ballance_set_cache_default(SDLINPUT_BUILD_TESTS OFF BOOL "")
 
 if (NOT WIN32)
     ballance_set_cache_default(CKBB_BUILD_MidiManager OFF BOOL "")
