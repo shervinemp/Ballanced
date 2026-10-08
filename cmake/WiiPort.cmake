@@ -261,7 +261,8 @@ endfunction()
 # Plugins: CK2's CKJpegDecoder.cpp already compiles stb_image (JPEG only, no
 # stdio); a second copy in AVIReader collides once both are linked statically.
 # The readers parse little-endian files and hand out host-order pixels and
-# samples. The reader headers include ImageReader.h from their own directory.
+# samples. Headers are included from their own directory, so every file of a
+# reader whose header changes is copied with it.
 function(ballance_wii_port_plugins)
     set(_root "${PROJECT_SOURCE_DIR}/Source/Plugins")
     ballance_wii_replace_sources(AVIReaderStatic
@@ -273,7 +274,10 @@ function(ballance_wii_port_plugins)
             FILES ImageReader/ImageReader.h ImageReader/BmpReader.h ImageReader/TgaReader.h
                   ImageReader/PcxReader.h ImageReader/ImageReader.cpp ImageReader/BmpReader.cpp
                   ImageReader/TgaReader.cpp ImageReader/PcxReader.cpp
-                  WavReader/WavReader.cpp AVIReader/FrameDecoder.cpp
+                  WavReader/WavReader.cpp
+                  AVIReader/AVIReader.h AVIReader/AviDemuxer.h AVIReader/AviTypes.h AVIReader/FrameDecoder.h
+                  AVIReader/RiffReader.h AVIReader/AVIReader.cpp AVIReader/AviDemuxer.cpp
+                  AVIReader/FrameDecoder.cpp AVIReader/RiffReader.cpp
             TARGETS ImageReaderStatic WavReaderStatic AVIReaderStatic
     )
 endfunction()

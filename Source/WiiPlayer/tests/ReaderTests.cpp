@@ -1,12 +1,13 @@
 // Media readers and writers: little-endian image and sound files must decode
 // to host-order ARGB pixel words and host-order samples, images must save back
 // to little-endian files, and VxMath's pixel conversions must agree with that
-// layout.
+// layout. Movies decode to the same host-order pixels.
 
 #include "TestFramework.h"
 
 #include "CKAll.h"
 
+#include <stdio.h>
 #include <string.h>
 
 namespace
@@ -14,7 +15,7 @@ namespace
     // Builds little-endian files byte by byte.
     struct Writer
     {
-        CKBYTE Data[256];
+        CKBYTE Data[512];
         int Size;
 
         Writer() : Size(0) {}
@@ -342,6 +343,99 @@ namespace
         }
         reader->Release();
     }
+
+    // Ballance's Atari logo is a Microsoft Video 1 (CRAM) AVI. One 8x4 frame:
+    // a red block, then a blue one.
+    void TestAvi()
+    {
+        Writer f;
+        f.Bytes("RIFF", 4);
+        f.U32(252);
+        f.Bytes("AVI ", 4);
+        f.Bytes("LIST", 4);
+        f.U32(192);
+        f.Bytes("hdrl", 4);
+        f.Bytes("avih", 4);
+        f.U32(56);
+        const CKDWORD avih[14] = {40000, 0, 0, 0x10, 1, 0, 1, 0, 8, 4, 0, 0, 0, 0};
+        for (int i = 0; i < 14; ++i)
+            f.U32(avih[i]);
+        f.Bytes("LIST", 4);
+        f.U32(116);
+        f.Bytes("strl", 4);
+        f.Bytes("strh", 4);
+        f.U32(56);
+        f.Bytes("vids", 4);
+        f.Bytes("MSVC", 4);
+        f.U32(0);
+        f.U16(0);
+        f.U16(0);
+        const CKDWORD strh[8] = {0, 1, 25, 0, 1, 0, 0, 0};
+        for (int i = 0; i < 8; ++i)
+            f.U32(strh[i]);
+        f.U16(0);
+        f.U16(0);
+        f.U16(8);
+        f.U16(4);
+        f.Bytes("strf", 4);
+        f.U32(40);
+        f.U32(40);
+        f.U32(8);
+        f.U32(4);
+        f.U16(1);
+        f.U16(16);
+        f.Bytes("CRAM", 4);
+        for (int i = 0; i < 5; ++i)
+            f.U32(0);
+        f.Bytes("LIST", 4);
+        f.U32(16);
+        f.Bytes("movi", 4);
+        f.Bytes("00dc", 4);
+        f.U32(4);
+        f.U16(0xFC00); // one-colour block, RGB555 red
+        f.U16(0x801F); // one-colour block, RGB555 blue
+        f.Bytes("idx1", 4);
+        f.U32(16);
+        f.Bytes("00dc", 4);
+        f.U32(0x10);
+        f.U32(4);
+        f.U32(4);
+        if (!WT_CHECK(f.Size == 260, "avi file %d bytes", f.Size))
+            return;
+
+        const char *kPath = "sd:/wiimovietest.avi";
+        FILE *file = fopen(kPath, "wb");
+        if (!WT_CHECK(file != NULL, "write %s", kPath))
+            return;
+        fwrite(f.Data, 1, f.Size, file);
+        fclose(file);
+
+        CKFileExtension ext((CKSTRING) "avi");
+        CKMovieReader *reader = CKGetPluginManager()->GetMovieReader(ext, NULL);
+        if (WT_CHECK(reader != NULL, "avi reader"))
+        {
+            CKMovieProperties *props = NULL;
+            const CKERROR opened = reader->OpenFile((CKSTRING)kPath);
+            if (WT_CHECK(opened == CK_OK, "avi open %d", opened) &&
+                WT_CHECK(reader->ReadFrame(0, &props) == CK_OK && props, "avi frame"))
+            {
+                WT_CHECK(reader->GetMovieFrameCount() == 1, "avi %d frames", reader->GetMovieFrameCount());
+                const VxImageDescEx &format = props->m_Format;
+                WT_CHECK(format.Width == 8 && format.Height == 4 && format.BitsPerPixel == 32,
+                         "avi frame %dx%d %d bits", format.Width, format.Height, format.BitsPerPixel);
+                const CKBYTE *image = format.Image ? format.Image : (const CKBYTE *)props->m_Data;
+                if (image && format.Width == 8)
+                {
+                    CKDWORD left, right;
+                    memcpy(&left, image, sizeof(left));
+                    memcpy(&right, image + 4 * 4, sizeof(right));
+                    WT_CHECK(left == 0xFFFF0000 && right == 0xFF0000FF, "avi pixels %08X %08X", left, right);
+                }
+            }
+            reader->Release();
+        }
+        remove(kPath);
+    }
 }
 
 void RunReaderTests()
@@ -356,5 +450,6 @@ void RunReaderTests()
     TestQuantize();
     TestBumpMap();
     TestWav();
+    TestAvi();
     wiitest::EndSuite();
 }

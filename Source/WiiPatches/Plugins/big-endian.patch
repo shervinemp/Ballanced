@@ -1,3 +1,237 @@
+diff --git a/AVIReader/AviDemuxer.cpp b/AVIReader/AviDemuxer.cpp
+index 4c6d1fc..3fbbff6 100644
+--- a/AVIReader/AviDemuxer.cpp
++++ b/AVIReader/AviDemuxer.cpp
+@@ -383,6 +383,7 @@ bool AviDemuxer::ParseHeaderList(const RiffReader::Chunk &hdrlChunk)
+             memset(&m_MainHeader, 0, sizeof(m_MainHeader));
+             if (!m_Reader.Read(&m_MainHeader, toRead))
+                 return false;
++            avi::FromLittleEndian(m_MainHeader);
+             foundAvih = true;
+         }
+         else if (child.IsList() && child.listType == avi::kFourCC_strl)
+@@ -501,7 +502,10 @@ bool AviDemuxer::ParseStreamHeader(const RiffReader::Chunk &chunk, avi::AviStrea
+     const size_t toRead = std::min(static_cast<size_t>(chunk.size),
+                                    sizeof(avi::AviStreamHeader));
+     memset(&strh, 0, sizeof(strh));
+-    return m_Reader.Read(&strh, toRead);
++    if (!m_Reader.Read(&strh, toRead))
++        return false;
++    avi::FromLittleEndian(strh);
++    return true;
+ }
+ 
+ bool AviDemuxer::ParseVideoFormat(const RiffReader::Chunk &chunk, avi::BitmapInfoHeader &bih, StreamEntry &stream)
+@@ -530,6 +534,7 @@ bool AviDemuxer::ParseVideoFormat(const RiffReader::Chunk &chunk, avi::BitmapInf
+         return false;
+ 
+     memcpy(&bih, fmt.data(), sizeof(avi::BitmapInfoHeader));
++    avi::FromLittleEndian(bih);
+ 
+     // Parse optional color masks.
+     if (bih.biCompression == avi::kCodec_BITFIELDS && fmt.size() >= sizeof(avi::BitmapInfoHeader) + 12)
+@@ -600,7 +605,10 @@ bool AviDemuxer::ParseAudioFormat(const RiffReader::Chunk &chunk, avi::WaveForma
+     const size_t toRead = std::min(static_cast<size_t>(chunk.size),
+                                    sizeof(avi::WaveFormatHeader));
+     memset(&wfh, 0, sizeof(wfh));
+-    return m_Reader.Read(&wfh, toRead);
++    if (!m_Reader.Read(&wfh, toRead))
++        return false;
++    avi::FromLittleEndian(wfh);
++    return true;
+ }
+ 
+ bool AviDemuxer::ParseStreamIndex(const RiffReader::Chunk &chunk, StreamEntry &stream)
+@@ -612,6 +620,7 @@ bool AviDemuxer::ParseStreamIndex(const RiffReader::Chunk &chunk, StreamEntry &s
+     memset(&hdr, 0, sizeof(hdr));
+     if (!m_Reader.Read(&hdr, sizeof(hdr)))
+         return false;
++    avi::FromLittleEndian(hdr);
+ 
+     // Field-indexed OpenDML is not implemented yet.
+     if (hdr.bIndexSubType == avi::kAVI_INDEX_2FIELD || hdr.wLongsPerEntry == 3)
+@@ -643,6 +652,7 @@ bool AviDemuxer::ParseSuperIndex(const RiffReader::Chunk &chunk, StreamEntry &st
+     memset(&hdr, 0, sizeof(hdr));
+     if (!m_Reader.Read(&hdr, sizeof(hdr)))
+         return false;
++    avi::FromLittleEndian(hdr);
+ 
+     if (hdr.bIndexType != avi::kAVI_INDEX_OF_INDEXES)
+         return false;
+@@ -668,7 +678,11 @@ bool AviDemuxer::ParseSuperIndex(const RiffReader::Chunk &chunk, StreamEntry &st
+     {
+         return false;
+     }
+-    return m_Reader.Read(stream.superIndex.data(), entryBytes);
++    if (!m_Reader.Read(stream.superIndex.data(), entryBytes))
++        return false;
++    for (avi::AviSuperIndexEntry &entry : stream.superIndex)
++        avi::FromLittleEndian(entry);
++    return true;
+ }
+ 
+ // ===========================================================================
+@@ -736,6 +750,8 @@ bool AviDemuxer::BuildIdx1Index()
+         return false;
+     if (!m_Reader.Read(idx1Entries.data(), idx1Bytes))
+         return false;
++    for (avi::AviOldIndexEntry &entry : idx1Entries)
++        avi::FromLittleEndian(entry);
+ 
+     for (auto &stream : m_Streams)
+         stream.index.clear();
+@@ -933,6 +949,7 @@ bool AviDemuxer::ParseStandardIndex(int64_t offset, uint32_t chunkSize, uint32_t
+     memset(&hdr, 0, sizeof(hdr));
+     if (!m_Reader.ReadAt(headerStart, &hdr, sizeof(hdr)))
+         return false;
++    avi::FromLittleEndian(hdr);
+ 
+     if (hdr.bIndexType != avi::kAVI_INDEX_OF_CHUNKS)
+         return false;
+@@ -967,6 +984,7 @@ bool AviDemuxer::ParseStandardIndex(int64_t offset, uint32_t chunkSize, uint32_t
+         avi::AviStdIndexEntry e;
+         if (!m_Reader.Read(&e, sizeof(e)))
+             return false;
++        avi::FromLittleEndian(e);
+ 
+         const uint32_t frameSize = e.dwSize & 0x7FFFFFFFu;
+         if (frameSize == 0 || frameSize > kMaxFramePayloadBytes)
+diff --git a/AVIReader/AviTypes.h b/AVIReader/AviTypes.h
+index 7967f69..6e06e73 100644
+--- a/AVIReader/AviTypes.h
++++ b/AVIReader/AviTypes.h
+@@ -193,6 +193,121 @@ struct AviStdIndexEntry
+ 
+ #pragma pack(pop)
+ 
++// ---------------------------------------------------------------------------
++// Headers and index entries read straight from the file hold little-endian
++// fields; FromLittleEndian puts them in host order (nothing to do on x86).
++// ---------------------------------------------------------------------------
++
++#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
++inline uint16_t FromLe(uint16_t v) { return static_cast<uint16_t>((v >> 8) | (v << 8)); }
++inline int16_t FromLe(int16_t v) { return static_cast<int16_t>(FromLe(static_cast<uint16_t>(v))); }
++inline uint32_t FromLe(uint32_t v) { return __builtin_bswap32(v); }
++inline int32_t FromLe(int32_t v) { return static_cast<int32_t>(__builtin_bswap32(static_cast<uint32_t>(v))); }
++inline uint64_t FromLe(uint64_t v) { return __builtin_bswap64(v); }
++
++inline void FromLittleEndian(MainAviHeader &h)
++{
++    h.dwMicroSecPerFrame = FromLe(h.dwMicroSecPerFrame);
++    h.dwMaxBytesPerSec = FromLe(h.dwMaxBytesPerSec);
++    h.dwPaddingGranularity = FromLe(h.dwPaddingGranularity);
++    h.dwFlags = FromLe(h.dwFlags);
++    h.dwTotalFrames = FromLe(h.dwTotalFrames);
++    h.dwInitialFrames = FromLe(h.dwInitialFrames);
++    h.dwStreams = FromLe(h.dwStreams);
++    h.dwSuggestedBufferSize = FromLe(h.dwSuggestedBufferSize);
++    h.dwWidth = FromLe(h.dwWidth);
++    h.dwHeight = FromLe(h.dwHeight);
++}
++
++inline void FromLittleEndian(AviStreamHeader &h)
++{
++    h.fccType = FromLe(h.fccType);
++    h.fccHandler = FromLe(h.fccHandler);
++    h.dwFlags = FromLe(h.dwFlags);
++    h.wPriority = FromLe(h.wPriority);
++    h.wLanguage = FromLe(h.wLanguage);
++    h.dwInitialFrames = FromLe(h.dwInitialFrames);
++    h.dwScale = FromLe(h.dwScale);
++    h.dwRate = FromLe(h.dwRate);
++    h.dwStart = FromLe(h.dwStart);
++    h.dwLength = FromLe(h.dwLength);
++    h.dwSuggestedBufferSize = FromLe(h.dwSuggestedBufferSize);
++    h.dwQuality = FromLe(h.dwQuality);
++    h.dwSampleSize = FromLe(h.dwSampleSize);
++    h.rcFrame.left = FromLe(h.rcFrame.left);
++    h.rcFrame.top = FromLe(h.rcFrame.top);
++    h.rcFrame.right = FromLe(h.rcFrame.right);
++    h.rcFrame.bottom = FromLe(h.rcFrame.bottom);
++}
++
++inline void FromLittleEndian(BitmapInfoHeader &h)
++{
++    h.biSize = FromLe(h.biSize);
++    h.biWidth = FromLe(h.biWidth);
++    h.biHeight = FromLe(h.biHeight);
++    h.biPlanes = FromLe(h.biPlanes);
++    h.biBitCount = FromLe(h.biBitCount);
++    h.biCompression = FromLe(h.biCompression);
++    h.biSizeImage = FromLe(h.biSizeImage);
++    h.biXPelsPerMeter = FromLe(h.biXPelsPerMeter);
++    h.biYPelsPerMeter = FromLe(h.biYPelsPerMeter);
++    h.biClrUsed = FromLe(h.biClrUsed);
++    h.biClrImportant = FromLe(h.biClrImportant);
++}
++
++inline void FromLittleEndian(WaveFormatHeader &h)
++{
++    h.wFormatTag = FromLe(h.wFormatTag);
++    h.nChannels = FromLe(h.nChannels);
++    h.nSamplesPerSec = FromLe(h.nSamplesPerSec);
++    h.nAvgBytesPerSec = FromLe(h.nAvgBytesPerSec);
++    h.nBlockAlign = FromLe(h.nBlockAlign);
++    h.wBitsPerSample = FromLe(h.wBitsPerSample);
++    h.cbSize = FromLe(h.cbSize);
++}
++
++inline void FromLittleEndian(AviOldIndexEntry &e)
++{
++    e.dwChunkId = FromLe(e.dwChunkId);
++    e.dwFlags = FromLe(e.dwFlags);
++    e.dwOffset = FromLe(e.dwOffset);
++    e.dwSize = FromLe(e.dwSize);
++}
++
++inline void FromLittleEndian(AviSuperIndexHeader &h)
++{
++    h.wLongsPerEntry = FromLe(h.wLongsPerEntry);
++    h.nEntriesInUse = FromLe(h.nEntriesInUse);
++    h.dwChunkId = FromLe(h.dwChunkId);
++}
++
++inline void FromLittleEndian(AviSuperIndexEntry &e)
++{
++    e.qwOffset = FromLe(e.qwOffset);
++    e.dwSize = FromLe(e.dwSize);
++    e.dwDuration = FromLe(e.dwDuration);
++}
++
++inline void FromLittleEndian(AviStdIndexHeader &h)
++{
++    h.wLongsPerEntry = FromLe(h.wLongsPerEntry);
++    h.nEntriesInUse = FromLe(h.nEntriesInUse);
++    h.dwChunkId = FromLe(h.dwChunkId);
++    h.qwBaseOffset = FromLe(h.qwBaseOffset);
++}
++
++inline void FromLittleEndian(AviStdIndexEntry &e)
++{
++    e.dwOffset = FromLe(e.dwOffset);
++    e.dwSize = FromLe(e.dwSize);
++}
++#else
++template <typename T>
++inline void FromLittleEndian(T &)
++{
++}
++#endif
++
+ // ---------------------------------------------------------------------------
+ // Unified frame-index entry (in-memory, built from idx1 or OpenDML)
+ // ---------------------------------------------------------------------------
+@@ -267,7 +382,8 @@ inline uint32_t StreamChunkId(int streamIndex, uint32_t streamType)
+ /// Returns -1 on invalid format.
+ inline int StreamIndexFromChunkId(uint32_t chunkId)
+ {
+-    const char *c = reinterpret_cast<const char *>(&chunkId);
++    // MakeFourCC keeps the first character in the low byte on any host.
++    const char c[2] = {static_cast<char>(chunkId & 0xFF), static_cast<char>((chunkId >> 8) & 0xFF)};
+     if (c[0] < '0' || c[0] > '9' || c[1] < '0' || c[1] > '9')
+         return -1;
+     return (c[0] - '0') * 10 + (c[1] - '0');
 diff --git a/AVIReader/FrameDecoder.cpp b/AVIReader/FrameDecoder.cpp
 index 8c0061c..2f5a424 100644
 --- a/AVIReader/FrameDecoder.cpp
