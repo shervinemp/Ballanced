@@ -25,6 +25,7 @@
 
 #include "VxImageDescEx.h"
 #include "VxMath.h"
+#include "VxMutex.h"
 #include "XString.h"
 
 // ============================================================================
@@ -308,6 +309,154 @@ static XString VxNormalizePath(const char *path) {
     return normalized;
 }
 
+// ----------------------------------------------------------------------------
+// Directory listings for file lookups.
+//
+// The path manager looks for each file the game loads in several folders, and
+// on a miss lists the folder to match the name whatever its case. On FAT every
+// stat() reads each directory of the path from the root again, so loading a
+// level made thousands of directory reads. Listings are read once, with the
+// stat data readdir already returns, and answer existence checks until a file
+// is created, written, deleted or renamed (VxWiiInvalidateDirectoryCache,
+// called by the path wrappers in System/PathSeparators.c).
+// ----------------------------------------------------------------------------
+
+namespace {
+struct CachedEntry {
+    XString Name;
+    XBOOL IsDirectory;
+    size_t Size;
+};
+
+struct CachedDirectory {
+    XString Path; // Normalized, no trailing '/' except a device root ("sd:/")
+    XBOOL Exists;
+    XClassArray<CachedEntry> Entries;
+};
+
+const int kMaxCachedDirectories = 64;
+XArray<CachedDirectory *> g_DirectoryCache;
+volatile unsigned int g_DirectoryGeneration = 0;
+unsigned int g_CachedGeneration = 0;
+VxMutex g_DirectoryCacheMutex;
+
+void ClearDirectoryCache() {
+    for (int i = 0; i < g_DirectoryCache.Size(); ++i)
+        delete g_DirectoryCache[i];
+    g_DirectoryCache.Clear();
+}
+
+// Reads a directory the way VxListDirectory reports it.
+void ReadDirectory(const XString &path, CachedDirectory &directory) {
+    directory.Path = path;
+    directory.Entries.Clear();
+    DIR *handle = opendir(path.CStr());
+    directory.Exists = handle != NULL;
+    if (!handle)
+        return;
+    struct dirent *entryData;
+    while ((entryData = readdir(handle)) != NULL) {
+        if (strcmp(entryData->d_name, ".") == 0 || strcmp(entryData->d_name, "..") == 0)
+            continue;
+        struct stat st = entryData->d_stat;
+        if (st.st_mode == 0) {
+            // A device that leaves the entry's stat empty.
+            XString fullpath = VxJoinPathString(path.CStr(), entryData->d_name);
+            if (stat(fullpath.CStr(), &st) != 0)
+                continue;
+        }
+        CachedEntry entry;
+        entry.Name = entryData->d_name;
+        entry.IsDirectory = S_ISDIR(st.st_mode) ? TRUE : FALSE;
+        entry.Size = (size_t)st.st_size;
+        directory.Entries.PushBack(entry);
+    }
+    closedir(handle);
+}
+
+// The listing of a normalized directory path; the caller holds the mutex.
+const CachedDirectory *FindDirectory(const XString &path) {
+    if (g_CachedGeneration != g_DirectoryGeneration) {
+        g_CachedGeneration = g_DirectoryGeneration;
+        ClearDirectoryCache();
+    }
+    for (int i = 0; i < g_DirectoryCache.Size(); ++i) {
+        if (g_DirectoryCache[i]->Path.Compare(path) == 0)
+            return g_DirectoryCache[i];
+    }
+    if (g_DirectoryCache.Size() >= kMaxCachedDirectories)
+        ClearDirectoryCache();
+    CachedDirectory *directory = new CachedDirectory;
+    ReadDirectory(path, *directory);
+    g_DirectoryCache.PushBack(directory);
+    return directory;
+}
+
+// Length of the device prefix and its ":/" ("sd:/" gives 4), or 0 when the
+// path does not start with one.
+int DeviceRootLength(const char *text) {
+    const char *c = text;
+    while (isalnum((unsigned char)*c))
+        ++c;
+    return (c > text && c[0] == ':' && c[1] == '/') ? (int)(c - text) + 2 : 0;
+}
+
+// Absolute paths ("sd:/a/b") with no ".", ".." or empty components, split
+// into their directory and last name.
+XBOOL SplitCacheablePath(const XString &path, XString &directory, XString &name) {
+    const char *text = path.CStr();
+    const int rootLength = DeviceRootLength(text);
+    if (rootLength == 0)
+        return FALSE;
+    int length = path.Length();
+    while (length > rootLength && text[length - 1] == '/')
+        --length;
+    if (length <= rootLength)
+        return FALSE; // The device root itself
+    for (const char *segment = text + rootLength; segment < text + length;) {
+        const char *end = segment;
+        while (end < text + length && *end != '/')
+            ++end;
+        const int size = (int)(end - segment);
+        if (size == 0 || (size == 1 && segment[0] == '.') || (size == 2 && segment[0] == '.' && segment[1] == '.'))
+            return FALSE;
+        segment = end + 1;
+    }
+    int slash = length - 1;
+    while (text[slash] != '/')
+        --slash;
+    directory = XString(text, slash >= rootLength ? slash : rootLength);
+    name = XString(text + slash + 1, length - slash - 1);
+    return TRUE;
+}
+
+// 1 when the path names an entry of that kind, 0 when it does not exist, -1
+// when only the file system can tell (a name differing in case only, which
+// FAT matches and NTFS may not, or a path the cache does not handle).
+int LookupCachedPath(const char *path, XBOOL wantDirectory) {
+    XString directory, name;
+    if (!SplitCacheablePath(VxNormalizePath(path), directory, name))
+        return -1;
+    VxMutexLock lock(g_DirectoryCacheMutex);
+    const CachedDirectory *listing = FindDirectory(directory);
+    if (!listing->Exists)
+        return 0;
+    XBOOL caseOnly = FALSE;
+    for (int i = 0; i < listing->Entries.Size(); ++i) {
+        const CachedEntry &entry = listing->Entries[i];
+        if (entry.Name.Compare(name) == 0)
+            return entry.IsDirectory == wantDirectory ? 1 : 0;
+        if (!caseOnly && entry.Name.ICompare(name) == 0)
+            caseOnly = TRUE;
+    }
+    return caseOnly ? -1 : 0;
+}
+} // namespace
+
+extern "C" void VxWiiInvalidateDirectoryCache(void) {
+    g_DirectoryGeneration = g_DirectoryGeneration + 1;
+}
+
 XString VxGetTempPath() {
     XString path = VxApplicationDirectory();
     path << "Temp/";
@@ -357,8 +506,13 @@ XBOOL VxDeleteDirectory(const char *path) {
 }
 
 XBOOL VxFileExists(const char *path) {
+    if (!path)
+        return FALSE;
+    const int cached = LookupCachedPath(path, FALSE);
+    if (cached >= 0)
+        return cached ? TRUE : FALSE;
     struct stat st;
-    return path && stat(VxNormalizePath(path).CStr(), &st) == 0 && S_ISREG(st.st_mode);
+    return stat(VxNormalizePath(path).CStr(), &st) == 0 && S_ISREG(st.st_mode);
 }
 
 XBOOL VxWiiFindPortFile(XString &file) {
@@ -384,8 +538,13 @@ XBOOL VxWiiFindPortFile(XString &file) {
 }
 
 XBOOL VxDirectoryExists(const char *path) {
+    if (!path)
+        return FALSE;
+    const int cached = LookupCachedPath(path, TRUE);
+    if (cached >= 0)
+        return cached ? TRUE : FALSE;
     struct stat st;
-    return path && stat(VxNormalizePath(path).CStr(), &st) == 0 && S_ISDIR(st.st_mode);
+    return stat(VxNormalizePath(path).CStr(), &st) == 0 && S_ISDIR(st.st_mode);
 }
 
 XBOOL VxCopyFile(const char *src, const char *dst, XBOOL failIfExists) {
@@ -457,38 +616,36 @@ XBOOL VxListDirectory(const char *dir, const char *mask, XBOOL includeDirectorie
         return FALSE;
 
     XString directory = VxNormalizePath(dir);
-    DIR *handle = opendir(directory.CStr());
-    if (!handle)
+    const int rootLength = DeviceRootLength(directory.CStr());
+    while (directory.Length() > (rootLength ? rootLength : 1) && directory[directory.Length() - 1] == '/')
+        directory.Crop(0, directory.Length() - 1);
+
+    // A copy of the listing, so callbacks may look files up themselves.
+    CachedDirectory listing;
+    XString parent, name;
+    if (rootLength > 0 && (SplitCacheablePath(directory, parent, name) || directory.Length() == rootLength)) {
+        VxMutexLock lock(g_DirectoryCacheMutex);
+        listing = *FindDirectory(directory);
+    } else {
+        ReadDirectory(directory, listing);
+    }
+    if (!listing.Exists)
         return FALSE;
 
-    XBOOL ok = TRUE;
-    struct dirent *entryData;
-    while ((entryData = readdir(handle)) != NULL) {
-        if (strcmp(entryData->d_name, ".") == 0 || strcmp(entryData->d_name, "..") == 0)
+    for (int i = 0; i < listing.Entries.Size(); ++i) {
+        const CachedEntry &cached = listing.Entries[i];
+        if (!VxDirectoryNameMatches(cached.Name.CStr(), mask))
             continue;
-        if (!VxDirectoryNameMatches(entryData->d_name, mask))
+        if (cached.IsDirectory && !includeDirectories)
             continue;
-
-        XString fullpath = VxJoinPathString(directory.CStr(), entryData->d_name);
-        struct stat st;
-        if (stat(fullpath.CStr(), &st) != 0)
-            continue;
-
-        const XBOOL isDirectory = S_ISDIR(st.st_mode) ? TRUE : FALSE;
-        if (isDirectory && !includeDirectories)
-            continue;
-
         VxDirectoryEntry entry;
-        entry.Name = entryData->d_name;
-        entry.IsDirectory = isDirectory;
-        entry.Size = (size_t)st.st_size;
-        if (!callback(&entry, userData)) {
-            ok = FALSE;
-            break;
-        }
+        entry.Name = cached.Name;
+        entry.IsDirectory = cached.IsDirectory;
+        entry.Size = cached.Size;
+        if (!callback(&entry, userData))
+            return FALSE;
     }
-    closedir(handle);
-    return ok;
+    return TRUE;
 }
 
 XBOOL VxGetCurrentDirectory(char *path, size_t pathSize) {

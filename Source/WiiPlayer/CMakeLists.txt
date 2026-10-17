@@ -68,19 +68,29 @@ configure_file("${_player_src}/StaticPluginRegistry.generated.h.in"
         "${_generated}/StaticPluginRegistry.generated.h" @ONLY)
 
 # Linked into each executable: a 1 MB main stack, like Windows gives the
-# engine (MainStack.c), backslashes in file names (PathSeparators.c) and a
-# sqrtf that uses the hardware estimate instead of newlib's (FastMath.c).
+# engine (MainStack.c), backslashes in file names (PathSeparators.c), a sqrtf
+# that uses the hardware estimate instead of newlib's (FastMath.c), a cheaper
+# heap lock (HeapLock.c), word-wise memcpy and memset (FastMemory.c) and pools
+# for small allocations (SmallBlocks.c).
 set(_console_runtime
         "${CMAKE_SOURCE_DIR}/Source/WiiPlatform/System/MainStack.c"
         "${CMAKE_SOURCE_DIR}/Source/WiiPlatform/System/PathSeparators.c"
-        "${CMAKE_SOURCE_DIR}/Source/WiiPlatform/System/FastMath.c")
-set(_path_wraps _open_r _stat_r lstat _unlink_r _rename_r _rmdir_r mkdir opendir chdir statvfs)
-list(TRANSFORM _path_wraps PREPEND "LINKER:--wrap=")
+        "${CMAKE_SOURCE_DIR}/Source/WiiPlatform/System/FastMath.c"
+        "${CMAKE_SOURCE_DIR}/Source/WiiPlatform/System/HeapLock.c"
+        "${CMAKE_SOURCE_DIR}/Source/WiiPlatform/System/FastMemory.c"
+        "${CMAKE_SOURCE_DIR}/Source/WiiPlatform/System/SmallBlocks.c")
+# GCC would otherwise turn FastMemory.c's loops back into memcpy and memset calls.
+set_source_files_properties("${CMAKE_SOURCE_DIR}/Source/WiiPlatform/System/FastMemory.c"
+        PROPERTIES COMPILE_OPTIONS "-fno-tree-loop-distribute-patterns;-fno-builtin")
+set(_runtime_wraps _open_r _stat_r lstat _unlink_r _rename_r _rmdir_r rmdir mkdir opendir chdir statvfs
+        __malloc_lock __malloc_unlock
+        _malloc_r _free_r _realloc_r _calloc_r _memalign_r _malloc_usable_size_r)
+list(TRANSFORM _runtime_wraps PREPEND "LINKER:--wrap=")
 # DolAlign.ld rounds the code and data segments up to 32 bytes, so each DOL
 # section size is a multiple of 32. Giving -T replaces the linker script gcc
 # picks for -mrvl, so rvl.ld is named after it.
 set(_dol_align "${CMAKE_SOURCE_DIR}/Source/WiiPlatform/System/DolAlign.ld")
-set(_console_link_options ${_path_wraps} "SHELL:-T \"${_dol_align}\"" "SHELL:-T rvl.ld")
+set(_console_link_options ${_runtime_wraps} "SHELL:-T \"${_dol_align}\"" "SHELL:-T rvl.ld")
 
 add_executable(WiiPlayer
         main.cpp
@@ -150,6 +160,7 @@ add_executable(WiiPlayerTests
         tests/DatabaseTests.cpp
         tests/MemoryTests.cpp
         tests/MathTests.cpp
+        tests/RuntimeTests.cpp
         tests/InputTests.cpp
         "${_generated}/TestFont.c"
         "${_player_src}/StaticPlugins.cpp"

@@ -253,6 +253,11 @@ bool WiiGamePlayer::SetupManagers()
         return false;
     }
 
+    // The render engine reorders each mesh's triangles at load time for a PC
+    // GPU's post-transform vertex cache, about a sixth of a level's loading
+    // time on the Wii.
+    m_RenderManager->SetRenderOptions((CKSTRING)"VertexCache", 0);
+
     InterfaceManager *interfaceManager = InterfaceManager::GetManager(m_CKContext);
     if (interfaceManager)
         interfaceManager->SetPlayerCommandHandler(&WiiGamePlayer::HandlePlayerCommand, this);

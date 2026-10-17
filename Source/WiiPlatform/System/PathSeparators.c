@@ -6,14 +6,27 @@
 //
 // Link this file into each executable, like MainStack.c: the C library is
 // scanned after the project's static libraries.
+//
+// VxMath keeps directory listings for file lookups (VxWindowFunctionsOgc.cpp);
+// the wrappers that create, write, delete or rename files tell it they changed.
 
 #include <dirent.h>
+#include <fcntl.h>
 #include <reent.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 
 #define WII_PATH_MAX 1024
+
+extern void VxWiiInvalidateDirectoryCache(void) __attribute__((weak));
+
+static int Changed(int result)
+{
+    if (VxWiiInvalidateDirectoryCache)
+        VxWiiInvalidateDirectoryCache();
+    return result;
+}
 
 static const char *ToSlashes(const char *path, char *buffer)
 {
@@ -31,7 +44,8 @@ int __real__open_r(struct _reent *r, const char *file, int flags, int mode);
 int __wrap__open_r(struct _reent *r, const char *file, int flags, int mode)
 {
     char buffer[WII_PATH_MAX];
-    return __real__open_r(r, ToSlashes(file, buffer), flags, mode);
+    const int fd = __real__open_r(r, ToSlashes(file, buffer), flags, mode);
+    return (flags & (O_WRONLY | O_RDWR | O_CREAT | O_TRUNC | O_APPEND)) ? Changed(fd) : fd;
 }
 
 int __real__stat_r(struct _reent *r, const char *file, struct stat *st);
@@ -52,7 +66,7 @@ int __real__unlink_r(struct _reent *r, const char *name);
 int __wrap__unlink_r(struct _reent *r, const char *name)
 {
     char buffer[WII_PATH_MAX];
-    return __real__unlink_r(r, ToSlashes(name, buffer));
+    return Changed(__real__unlink_r(r, ToSlashes(name, buffer)));
 }
 
 int __real__rename_r(struct _reent *r, const char *existing, const char *newName);
@@ -60,21 +74,29 @@ int __wrap__rename_r(struct _reent *r, const char *existing, const char *newName
 {
     char existingBuffer[WII_PATH_MAX];
     char newBuffer[WII_PATH_MAX];
-    return __real__rename_r(r, ToSlashes(existing, existingBuffer), ToSlashes(newName, newBuffer));
+    return Changed(__real__rename_r(r, ToSlashes(existing, existingBuffer), ToSlashes(newName, newBuffer)));
 }
 
 int __real__rmdir_r(struct _reent *r, const char *name);
 int __wrap__rmdir_r(struct _reent *r, const char *name)
 {
     char buffer[WII_PATH_MAX];
-    return __real__rmdir_r(r, ToSlashes(name, buffer));
+    return Changed(__real__rmdir_r(r, ToSlashes(name, buffer)));
+}
+
+// rmdir() calls _rmdir_r inside newlib's own object, out of --wrap's reach.
+int __real_rmdir(const char *path);
+int __wrap_rmdir(const char *path)
+{
+    char buffer[WII_PATH_MAX];
+    return Changed(__real_rmdir(ToSlashes(path, buffer)));
 }
 
 int __real_mkdir(const char *path, mode_t mode);
 int __wrap_mkdir(const char *path, mode_t mode)
 {
     char buffer[WII_PATH_MAX];
-    return __real_mkdir(ToSlashes(path, buffer), mode);
+    return Changed(__real_mkdir(ToSlashes(path, buffer), mode));
 }
 
 DIR *__real_opendir(const char *path);

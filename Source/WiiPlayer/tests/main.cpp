@@ -63,6 +63,7 @@ int main(int argc, char **argv)
 
     RunMemoryTests();
     RunMathTests();
+    RunRuntimeTests();
     RunChunkTests();
 
     WT_CHECK(CKStartUp() == CK_OK, "CKStartUp");

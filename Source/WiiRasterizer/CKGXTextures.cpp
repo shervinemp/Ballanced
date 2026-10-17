@@ -45,10 +45,59 @@ namespace
         return offset;
     }
 
+    // Writes ARGB pixels into a tiled level (4x4 texel blocks), one block at a
+    // time in the order GX stores them. For regions on whole blocks.
+    void EncodeBlocks(u8 *level, int levelWidth, u8 format, const u32 *pixels, int pitch,
+                      int x0, int y0, int width, int height)
+    {
+        const int blocksPerRow = (levelWidth + 3) / 4;
+        const int blockBytes = format == GX_TF_RGBA8 ? 64 : 32;
+        for (int by = 0; by < height; by += 4)
+        {
+            u8 *out = level + ((y0 + by) / 4 * blocksPerRow + x0 / 4) * blockBytes;
+            for (int bx = 0; bx < width; bx += 4, out += blockBytes)
+            {
+                const u32 *block = pixels + (size_t)by * pitch + bx;
+                if (format == GX_TF_RGBA8)
+                {
+                    // A,R pairs for the 16 texels, then G,B pairs.
+                    u16 *ar = (u16 *)out;
+                    u16 *gb = (u16 *)(out + 32);
+                    for (int row = 0; row < 4; ++row, block += pitch)
+                    {
+                        for (int x = 0; x < 4; ++x)
+                        {
+                            const u32 argb = block[x];
+                            *ar++ = (u16)(argb >> 16);
+                            *gb++ = (u16)argb;
+                        }
+                    }
+                }
+                else
+                {
+                    u16 *rgb565 = (u16 *)out;
+                    for (int row = 0; row < 4; ++row, block += pitch)
+                    {
+                        for (int x = 0; x < 4; ++x)
+                        {
+                            const u32 argb = block[x];
+                            *rgb565++ = (u16)(((argb >> 8) & 0xF800) | ((argb >> 5) & 0x07E0) | ((argb >> 3) & 0x001F));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Writes ARGB pixels into a tiled level (4x4 texel blocks).
     void EncodeRegion(u8 *level, int levelWidth, u8 format, const u32 *pixels, int pitch,
                       int x0, int y0, int width, int height)
     {
+        if (((x0 | y0 | width | height) & 3) == 0)
+        {
+            EncodeBlocks(level, levelWidth, format, pixels, pitch, x0, y0, width, height);
+            return;
+        }
         const int blocksPerRow = (levelWidth + 3) / 4;
         for (int y = 0; y < height; ++y)
         {

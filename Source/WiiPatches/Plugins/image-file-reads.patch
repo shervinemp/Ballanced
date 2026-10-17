@@ -1,0 +1,56 @@
+--- a/ImageReader/BmpReader.cpp
++++ b/ImageReader/BmpReader.cpp
+@@ -1,4 +1,5 @@
+ #include "BmpReader.h"
++#include "VxMemoryMappedFile.h"
+ 
+ #include "XArray.h"
+ 
+@@ -716,6 +717,19 @@ int BMP_Read(void *data, int size, CKBitmapProperties *props)
+     if (size < 0)
+         return CKBITMAPERROR_FILECORRUPTED;
+ 
++#if defined(GEKKO)
++    // A file name: on the Wii read the whole file at once, into aligned memory
++    // the SD card driver fills directly (VxMemoryMappedFileOgc.cpp), rather
++    // than piece by piece through stdio's small buffer.
++    if (size == 0)
++    {
++        VxMemoryMappedFile file((const char *)data);
++        if (!file.IsValid() || file.GetFileSize() > 0x7FFFFFFF)
++            return CKBITMAPERROR_READERROR;
++        return BMP_Read(file.GetBase(), (int)file.GetFileSize(), props);
++    }
++#endif
++
+     // Create data source
+     BmpDataSource *src = (size == 0)
+                              ? (BmpDataSource *)new BmpFileSource((const char *)data)
+--- a/ImageReader/TgaReader.cpp
++++ b/ImageReader/TgaReader.cpp
+@@ -1,4 +1,5 @@
+ #include "TgaReader.h"
++#include "VxMemoryMappedFile.h"
+ 
+ #include "XArray.h"
+ 
+@@ -528,6 +529,19 @@ int TGA_Read(void *data, int size, CKBitmapProperties *props)
+     if (size < 0)
+         return CKBITMAPERROR_FILECORRUPTED;
+ 
++#if defined(GEKKO)
++    // A file name: on the Wii read the whole file at once, into aligned memory
++    // the SD card driver fills directly (VxMemoryMappedFileOgc.cpp), rather
++    // than piece by piece through stdio's small buffer.
++    if (size == 0)
++    {
++        VxMemoryMappedFile file((const char *)data);
++        if (!file.IsValid() || file.GetFileSize() > 0x7FFFFFFF)
++            return CKBITMAPERROR_READERROR;
++        return TGA_Read(file.GetBase(), (int)file.GetFileSize(), props);
++    }
++#endif
++
+     // Create data source
+     TgaDataSource *src = (size == 0)
+                              ? (TgaDataSource *)new TgaFileSource((const char *)data)

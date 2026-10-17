@@ -1,0 +1,351 @@
+--- a/physics_RT/ivp/ivp_compact_builder/ivp_surbuild_ledge_soup.cxx
++++ b/physics_RT/ivp/ivp_compact_builder/ivp_surbuild_ledge_soup.cxx
+@@ -36,6 +36,10 @@ public:
+     IVP_Compact_Ledge *compact_ledge;
+     IVV_Sphere *child_1, *child_2;
+ 
++    // The box calculate_boundingbox() takes around a terminal sphere, set
++    // before clustering (a terminal does not change while it is clustered).
++    IVP_DOUBLE box_min[3], box_max[3];
++
+     IVV_Sphere() {
+         number = 0;
+         radius = 0;
+@@ -1006,45 +1010,48 @@ void IVP_SurfaceBuilder_Ledge_Soup::replace_childspheres_in_spherelist_with_moth
+ //   top-down
+ // ------------------------------------------------------------------------------
+ 
++// Splits of a node's terminals along each axis while the best one is chosen,
++// shared by the whole recursion: a node is done with them before its children
++// are clustered.
++static IVV_Sphere **ivv_split_scratch = NULL;
++
+ void IVP_SurfaceBuilder_Ledge_Soup::cluster_spheres_topdown_mediancut(IVP_DOUBLE /*threshold_increase*/)
+ {
+ 
+     IVP_U_Vector<IVV_Sphere> terminals;
+ 
++    const IVP_DOUBLE dimension_steps = IVP_COMPACT_BOUNDINGBOX_STEP_SIZE;
+     for (int next_sphere = this->spheres_cluster[0].next; next_sphere != 0; next_sphere = this->spheres_cluster[next_sphere].next)
+     {
+-        terminals.add(this->spheres_cluster[next_sphere].sphere);
++        IVV_Sphere *sphere = this->spheres_cluster[next_sphere].sphere;
++        IVP_DOUBLE work = dimension_steps * sphere->radius;
++        for (int i = 0; i < 3; i++)
++        {
++            sphere->box_min[i] = sphere->center.k[i] - (sphere->box_sizes[i] * work);
++            sphere->box_max[i] = sphere->center.k[i] + (sphere->box_sizes[i] * work);
++        }
++        terminals.add(sphere);
+     }
+ 
+     this->number_of_nodes = this->number_of_terminal_spheres; // [# of nodes] = [# of term.nodes] + [# of internal nodes]; needed for calculation of compact_surface size!
+ 
++    ivv_split_scratch = (IVV_Sphere **)p_malloc(2 * (terminals.len() + 1) * sizeof(IVV_Sphere *));
+     this->spheres_cluster[this->spheres_cluster[0].next].sphere = this->cluster_spheres_topdown_mediancut_recursively(&terminals);
++    P_FREE(ivv_split_scratch);
+ 
+     return;
+ }
+ 
+-void IVP_SurfaceBuilder_Ledge_Soup::calculate_boundingbox(IVP_U_Vector<IVV_Sphere> *terminals, IVP_U_Float_Point *ext_min, IVP_U_Float_Point *ext_max)
++// The box around terminal spheres, from the boxes set before clustering.
++static void ivv_calculate_boundingbox(IVV_Sphere *const *terminals, int n_terminals, IVP_U_Float_Point *ext_min, IVP_U_Float_Point *ext_max)
+ {
+-
+-    const IVP_DOUBLE dimension_steps = IVP_COMPACT_BOUNDINGBOX_STEP_SIZE;
+-
+     ext_min->set(1000000.0f, 1000000.0f, 1000000.0f);
+     ext_max->set(-1000000.0f, -1000000.0f, -1000000.0f);
+ 
+-    for (int x = 0; x < terminals->len(); x++)
++    for (int x = 0; x < n_terminals; x++)
+     {
+-
+-        IVV_Sphere *sphere = terminals->element_at(x);
+-
+-        IVP_DOUBLE work = dimension_steps * sphere->radius;
+-
+-        IVP_DOUBLE min[3], max[3];
+-        min[0] = sphere->center.k[0] - (sphere->box_sizes[0] * work);
+-        min[1] = sphere->center.k[1] - (sphere->box_sizes[1] * work);
+-        min[2] = sphere->center.k[2] - (sphere->box_sizes[2] * work);
+-        max[0] = sphere->center.k[0] + (sphere->box_sizes[0] * work);
+-        max[1] = sphere->center.k[1] + (sphere->box_sizes[1] * work);
+-        max[2] = sphere->center.k[2] + (sphere->box_sizes[2] * work);
++        const IVP_DOUBLE *min = terminals[x]->box_min;
++        const IVP_DOUBLE *max = terminals[x]->box_max;
+ 
+         if (min[0] < ext_min->k[0])
+             ext_min->k[0] = min[0];
+@@ -1059,8 +1066,82 @@ void IVP_SurfaceBuilder_Ledge_Soup::calculate_boundingbox(IVP_U_Vector<IVV_Spher
+         if (max[2] > ext_max->k[2])
+             ext_max->k[2] = max[2];
+     }
++}
+ 
+-    return;
++void IVP_SurfaceBuilder_Ledge_Soup::calculate_boundingbox(IVP_U_Vector<IVV_Sphere> *terminals, IVP_U_Float_Point *ext_min, IVP_U_Float_Point *ext_max)
++{
++    ivv_calculate_boundingbox((IVV_Sphere *const *)terminals->elems, terminals->len(), ext_min, ext_max);
++}
++
++// Assigns terminals to either side of the median of their centers on an axis
++// (see cluster_spheres_topdown_mediancut_recursively).
++static void ivv_split_at_median(IVP_U_Vector<IVV_Sphere> *terminals, int axis, IVV_Sphere **left, int *n_left,
++                                IVV_Sphere **right, int *n_right)
++{
++    int left_len = 0, right_len = 0;
++    IVP_DOUBLE median = 0.0f;
++    for (int median_average = 0; median_average < terminals->len(); median_average++)
++    {
++        median += terminals->element_at(median_average)->center.k[axis];
++    }
++    median /= terminals->len();
++
++    IVP_BOOL toggle = IVP_TRUE;
++    for (int x = 0; x < terminals->len(); x++)
++    {
++        IVV_Sphere *terminal_sphere = terminals->element_at(x);
++
++        if (terminal_sphere->center.k[axis] < (median - P_FLOAT_RES))
++        {
++            left[left_len++] = terminal_sphere; // sphere center left of the median
++        }
++        else if (terminal_sphere->center.k[axis] > (median + P_FLOAT_RES))
++        {
++            right[right_len++] = terminal_sphere; // sphere center right of the median
++        }
++        else
++        { // current sphere center on median
++            IVV_Sphere *reference_sphere;
++            if (x == terminals->len() - 1)
++                reference_sphere = terminals->element_at(x - 1);
++            else
++                reference_sphere = terminals->element_at(x + 1);
++
++            if (reference_sphere->center.k[axis] < (median - P_FLOAT_RES))
++            {
++                right[right_len++] = terminal_sphere;
++                continue;
++            }
++            if (reference_sphere->center.k[axis] > (median + P_FLOAT_RES))
++            {
++                left[left_len++] = terminal_sphere;
++                continue;
++            }
++            // reference sphere also had center on median!!
++            if (left_len == 0)
++            {
++                left[left_len++] = terminal_sphere;
++                continue;
++            }
++            if (right_len == 0)
++            {
++                right[right_len++] = terminal_sphere;
++                continue;
++            }
++            if (toggle)
++            {
++                left[left_len++] = terminal_sphere;
++                toggle = IVP_FALSE;
++            }
++            else
++            {
++                right[right_len++] = terminal_sphere;
++                toggle = IVP_TRUE;
++            }
++        }
++    }
++    *n_left = left_len;
++    *n_right = right_len;
+ }
+ 
+ IVV_Sphere *IVP_SurfaceBuilder_Ledge_Soup::cluster_spheres_topdown_mediancut_recursively(IVP_U_Vector<IVV_Sphere> *terminals)
+@@ -1180,14 +1261,13 @@ IVV_Sphere *IVP_SurfaceBuilder_Ledge_Soup::cluster_spheres_topdown_mediancut_rec
+     }
+ #endif
+ 
+-    // IVP_U_Vector<IVV_Sphere> lefthand_terminals[3], righthand_terminals[3];
+-    IVP_U_Vector<IVV_Sphere> *lefthand_terminals[3], *righthand_terminals[3];
+-    lefthand_terminals[0] = new IVP_U_Vector<IVV_Sphere>(terminals->len());
+-    lefthand_terminals[1] = new IVP_U_Vector<IVV_Sphere>(terminals->len());
+-    lefthand_terminals[2] = new IVP_U_Vector<IVV_Sphere>(terminals->len());
+-    righthand_terminals[0] = new IVP_U_Vector<IVV_Sphere>(terminals->len());
+-    righthand_terminals[1] = new IVP_U_Vector<IVV_Sphere>(terminals->len());
+-    righthand_terminals[2] = new IVP_U_Vector<IVV_Sphere>(terminals->len());
++    // Each axis is split into the shared scratch arrays, keeping only the sizes
++    // and boxes of the halves; the chosen split is then made again (the same
++    // way, so into the same halves) into the vectors the children get. This
++    // used to allocate six vectors of the node's size.
++    IVV_Sphere **scratch_left = ivv_split_scratch;
++    IVV_Sphere **scratch_right = ivv_split_scratch + terminals->len();
++    int n_left[3], n_right[3];
+ 
+     IVP_FLOAT difference_in_boundingbox_volumes[3];
+ 
+@@ -1197,101 +1277,13 @@ IVV_Sphere *IVP_SurfaceBuilder_Ledge_Soup::cluster_spheres_topdown_mediancut_rec
+     int axis = axes_order[0]; // we just balance over the first
+ #endif
+     {
+-        // calculate median on chosen axis
+-        IVP_DOUBLE median = 0.0f;
+-
+-        for (int median_average = 0; median_average < terminals->len(); median_average++)
+-        {
+-            median += terminals->element_at(median_average)->center.k[axis];
+-        }
+-
+-        median /= terminals->len();
+-
+-        IVP_IF(0)
+-        {
+-            //		    ivp_message("Median on axis %d: %f\n", axis, median);
+-        }
+-
+-        // assign terminals to either side of splitting plane
+-        // (this is a bit tricky as we have to carefully handle terminals lying on the median itself;
+-        //  to avoid ending up with an empty subbox by assigning a median-terminal randomly to the
+-        //  same side as the non-median-terminal, we examine the non-median-terminal and choose the
+-        //  opposite side; in case of more than one median-terminal we alternate between left and
+-        //  right side)
+-        IVP_BOOL toggle = IVP_TRUE;
+-
+-        for (int x = 0; x < terminals->len(); x++)
+-        {
+-            IVV_Sphere *terminal_sphere = terminals->element_at(x);
+-
+-            if (terminal_sphere->center.k[axis] < (median - P_FLOAT_RES))
+-            {
+-
+-                lefthand_terminals[axis]->add(terminal_sphere); // sphere center left of the median
+-            }
+-            else if (terminal_sphere->center.k[axis] > (median + P_FLOAT_RES))
+-            {
+-
+-                righthand_terminals[axis]->add(terminal_sphere); // sphere center right of the median
+-            }
+-            else
+-            { // current sphere center on median
+-
+-                IVV_Sphere *reference_sphere;
+-
+-                if (x == terminals->len() - 1)
+-                {
+-                    reference_sphere = terminals->element_at(x - 1);
+-                }
+-                else
+-                {
+-                    reference_sphere = terminals->element_at(x + 1);
+-                }
+-
+-                if (reference_sphere->center.k[axis] < (median - P_FLOAT_RES))
+-                {
+-                    righthand_terminals[axis]->add(terminal_sphere);
+-                    continue;
+-                }
+-
+-                if (reference_sphere->center.k[axis] > (median + P_FLOAT_RES))
+-                {
+-                    lefthand_terminals[axis]->add(terminal_sphere);
+-                    continue;
+-                }
+-
+-                { // reference sphere also had center on median!!
+-                    if (lefthand_terminals[axis]->len() == 0)
+-                    {
+-                        lefthand_terminals[axis]->add(terminal_sphere);
+-                        continue;
+-                    }
+-
+-                    if (righthand_terminals[axis]->len() == 0)
+-                    {
+-                        righthand_terminals[axis]->add(terminal_sphere);
+-                        continue;
+-                    }
+-
+-                    if (toggle)
+-                    {
+-                        lefthand_terminals[axis]->add(terminal_sphere);
+-                        toggle = IVP_FALSE;
+-                    }
+-                    else
+-                    {
+-                        righthand_terminals[axis]->add(terminal_sphere);
+-                        toggle = IVP_TRUE;
+-                    }
+-                }
+-            }
+-        }
++        ivv_split_at_median(terminals, axis, scratch_left, &n_left[axis], scratch_right, &n_right[axis]);
+ 
+         // calculate children's boundingboxes for all three possible splits and choose the split with
+         // optimal balanced boundingbox volume/surface
+         IVP_U_Float_Point min[2], max[2];
+-        this->calculate_boundingbox(lefthand_terminals[axis], &min[0], &max[0]);
+-        this->calculate_boundingbox(righthand_terminals[axis], &min[1], &max[1]);
++        ivv_calculate_boundingbox(scratch_left, n_left[axis], &min[0], &max[0]);
++        ivv_calculate_boundingbox(scratch_right, n_right[axis], &min[1], &max[1]);
+ 
+ #ifdef IVP_CLUSTER_SHORTRANGE_BALANCE_VOLUME
+         IVP_U_Float_Point dim1(IVP_Inline_Math::fabsd(max[0].k[0] - min[0].k[0]),
+@@ -1302,18 +1294,12 @@ IVV_Sphere *IVP_SurfaceBuilder_Ledge_Soup::cluster_spheres_topdown_mediancut_rec
+                                IVP_Inline_Math::fabsd(max[1].k[2] - min[1].k[2])); // slower!
+         IVP_FLOAT volume1 = dim1.k[0] * dim1.k[1] * dim1.k[2];
+         IVP_FLOAT volume2 = dim2.k[0] * dim2.k[1] * dim2.k[2];
+-        // IVP_FLOAT volume1 = fabs(max[0].k[0]-min[0].k[0]) * fabs(max[0].k[1]-min[0].k[1]) * fabs(max[0].k[2]-min[0].k[2]); // faster!
+-        // IVP_FLOAT volume2 = fabs(max[1].k[0]-min[1].k[0]) * fabs(max[1].k[1]-min[1].k[1]) * fabs(max[1].k[2]-min[1].k[2]); // faster!
+         difference_in_boundingbox_volumes[axis] = IVP_Inline_Math::fabsd(volume2 - volume1);
+ #else
+-
+-        // difference_in_boundingbox_volumes[axis] = max[left].k[axis] - min[right].k[axis];
+         IVP_U_Float_Point dim1(IVP_Inline_Math::fabsd(max[0].k[0] - min[0].k[0]), IVP_Inline_Math::fabsd(max[0].k[1] - min[0].k[1]), IVP_Inline_Math::fabsd(max[0].k[2] - min[0].k[2])); // slower!
+         IVP_U_Float_Point dim2(IVP_Inline_Math::fabsd(max[1].k[0] - min[1].k[0]), IVP_Inline_Math::fabsd(max[1].k[1] - min[1].k[1]), IVP_Inline_Math::fabsd(max[1].k[2] - min[1].k[2])); // slower!
+         IVP_FLOAT volume1 = dim1.k[0] * dim1.k[1] * dim1.k[2];
+         IVP_FLOAT volume2 = dim2.k[0] * dim2.k[1] * dim2.k[2];
+-        // IVP_FLOAT volume1 = fabs(max[0].k[0]-min[0].k[0]) * fabs(max[0].k[1]-min[0].k[1]) * fabs(max[0].k[2]-min[0].k[2]); // faster!
+-        // IVP_FLOAT volume2 = fabs(max[1].k[0]-min[1].k[0]) * fabs(max[1].k[1]-min[1].k[1]) * fabs(max[1].k[2]-min[1].k[2]); // faster!
+         difference_in_boundingbox_volumes[axis] = volume2 + volume1;
+ #endif
+     }
+@@ -1327,7 +1313,7 @@ IVV_Sphere *IVP_SurfaceBuilder_Ledge_Soup::cluster_spheres_topdown_mediancut_rec
+         {
+             if (difference_in_boundingbox_volumes[i] < max_diff)
+             {
+-                if ((lefthand_terminals[i]->len() != 0) && (righthand_terminals[i]->len() != 0))
++                if ((n_left[i] != 0) && (n_right[i] != 0))
+                 {
+                     chosen_axis = i;
+                     max_diff = difference_in_boundingbox_volumes[i];
+@@ -1339,21 +1325,19 @@ IVV_Sphere *IVP_SurfaceBuilder_Ledge_Soup::cluster_spheres_topdown_mediancut_rec
+     int chosen_axis = axes_order[0];
+ #endif
+ 
+-    // printf("Chosen axis: %d\n", chosen_axis);
++    IVP_ASSERT(n_left[chosen_axis] != 0);
++    IVP_ASSERT(n_right[chosen_axis] != 0);
+ 
+-    IVP_ASSERT(lefthand_terminals[chosen_axis]->len() != 0);
+-    IVP_ASSERT(righthand_terminals[chosen_axis]->len() != 0);
++    IVP_U_Vector<IVV_Sphere> lefthand_terminals(n_left[chosen_axis]), righthand_terminals(n_right[chosen_axis]);
++    int left_len, right_len;
++    ivv_split_at_median(terminals, chosen_axis, (IVV_Sphere **)lefthand_terminals.elems, &left_len,
++                        (IVV_Sphere **)righthand_terminals.elems, &right_len);
++    lefthand_terminals.n_elems = (unsigned short)left_len;
++    righthand_terminals.n_elems = (unsigned short)right_len;
+ 
+     // recursively process subsets
+-    new_sphere->child_1 = this->cluster_spheres_topdown_mediancut_recursively(lefthand_terminals[chosen_axis]);
+-    new_sphere->child_2 = this->cluster_spheres_topdown_mediancut_recursively(righthand_terminals[chosen_axis]);
+-
+-    P_DELETE(lefthand_terminals[0]);
+-    P_DELETE(lefthand_terminals[1]);
+-    P_DELETE(lefthand_terminals[2]);
+-    P_DELETE(righthand_terminals[0]);
+-    P_DELETE(righthand_terminals[1]);
+-    P_DELETE(righthand_terminals[2]);
++    new_sphere->child_1 = this->cluster_spheres_topdown_mediancut_recursively(&lefthand_terminals);
++    new_sphere->child_2 = this->cluster_spheres_topdown_mediancut_recursively(&righthand_terminals);
+ 
+     IVP_ASSERT(new_sphere->child_1 != 0);
+     IVP_ASSERT(new_sphere->child_2 != 0);

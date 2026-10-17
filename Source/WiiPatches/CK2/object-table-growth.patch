@@ -1,0 +1,14 @@
+--- a/src/CKObjectManager.cpp
++++ b/src/CKObjectManager.cpp
+@@ -346,7 +346,10 @@ CK_ID CKObjectManager::RegisterObject(CKObject *iObject) {
+     } else {
+         ++m_ObjectCount;
+         if (m_ObjectCount >= m_AllocatedObjectCount) {
+-            int newCount = m_AllocatedObjectCount + 100;
++            // Grow by half rather than by 100 entries: a level registers tens of
++            // thousands of objects, and copying the whole table every hundred
++            // of them took a few percent of the loading time on the Wii.
++            int newCount = m_AllocatedObjectCount + (m_AllocatedObjectCount / 2 > 100 ? m_AllocatedObjectCount / 2 : 100);
+             CKObject **newObjs = new CKObject *[newCount];
+             memset(newObjs, 0, newCount * sizeof(CKObject *));
+             if (m_Objects) {

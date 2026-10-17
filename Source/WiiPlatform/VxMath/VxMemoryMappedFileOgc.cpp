@@ -3,12 +3,15 @@
  * @brief VxMemoryMappedFile for the Nintendo Wii.
  *
  * There is no memory mapping on SD/USB storage, so the file is read into a
- * heap buffer. Reads go through stdio in large blocks, which is what libfat
- * handles best.
+ * heap buffer: in one unbuffered read, into memory aligned to 32 bytes, so
+ * libfat can have the device driver transfer whole runs of sectors straight
+ * into it. libogc's SD card driver reads into an unaligned buffer through a
+ * bounce buffer, 8 sectors (4 KB) a request.
  */
 
 #include "VxMemoryMappedFile.h"
 
+#include <malloc.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -30,6 +33,7 @@ VxMemoryMappedFile::VxMemoryMappedFile(const char *pszFileName) {
         m_errCode = VxMMF_FileOpen;
         return;
     }
+    setvbuf(file, NULL, _IONBF, 0);
 
     long size = -1;
     if (fseek(file, 0, SEEK_END) == 0)
@@ -41,7 +45,7 @@ VxMemoryMappedFile::VxMemoryMappedFile(const char *pszFileName) {
     }
 
     m_cbFile = (size_t)size;
-    m_pMemoryMappedFileBase = malloc(m_cbFile);
+    m_pMemoryMappedFileBase = memalign(32, m_cbFile);
     if (!m_pMemoryMappedFileBase) {
         fclose(file);
         m_cbFile = 0;

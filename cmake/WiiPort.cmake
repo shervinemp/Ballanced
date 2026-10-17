@@ -229,6 +229,13 @@ function(ballance_wii_port_ck2)
             FILES src/CKPathManager.cpp
             TARGETS CK2
     )
+    # The object table grows by half instead of by 100 entries at a time.
+    ballance_wii_patch(CK2Objects
+            ROOT "${PROJECT_SOURCE_DIR}/Source/CK2"
+            PATCH "${BALLANCE_WII_PATCH_DIR}/CK2/object-table-growth.patch"
+            FILES src/CKObjectManager.cpp
+            TARGETS CK2
+    )
 endfunction()
 
 # RenderEngine: static GX rasterizer registration and Wii display discovery.
@@ -290,9 +297,12 @@ function(ballance_wii_port_plugins)
     ballance_wii_replace_sources(AVIReaderStatic
             REMOVE "${_root}/AVIReader/StbImageImpl.cpp"
     )
+    # On the Wii, image files are read whole, as compositions are (see
+    # VxMemoryMappedFileOgc.cpp), instead of through stdio.
     ballance_wii_patch(Plugins
             ROOT "${_root}"
             PATCH "${BALLANCE_WII_PATCH_DIR}/Plugins/big-endian.patch"
+                  "${BALLANCE_WII_PATCH_DIR}/Plugins/image-file-reads.patch"
             FILES ImageReader/ImageReader.h ImageReader/BmpReader.h ImageReader/TgaReader.h
                   ImageReader/PcxReader.h ImageReader/ImageReader.cpp ImageReader/BmpReader.cpp
                   ImageReader/TgaReader.cpp ImageReader/PcxReader.cpp
@@ -360,6 +370,15 @@ function(ballance_wii_port_building_blocks)
             FILES TT_Toolbox_RT/Behaviors/ReplacePath.cpp
             TARGETS TT_Toolbox_RTStatic
     )
+    # Physics: building a level's collision trees clustered its pieces with
+    # six scratch vectors per tree node and recomputed every piece's box at
+    # each level; the same trees now come from cached boxes and shared scratch.
+    ballance_wii_patch(IvpLedgeSoup
+            ROOT "${_root}"
+            PATCH "${BALLANCE_WII_PATCH_DIR}/BuildingBlocks/ivp-ledge-soup-clustering.patch"
+            FILES physics_RT/ivp/ivp_compact_builder/ivp_surbuild_ledge_soup.cxx
+            TARGETS ivp_compact_builder
+    )
     # Fonts: big-endian font manager chunks and atlas texels; with no system
     # fonts, TrueType fonts come from a Fonts folder next to the game, and font
     # indices from the PC's font list fall back to Arial or Roboto.
@@ -374,8 +393,10 @@ endfunction()
 # Code generation settings for every target in the tree:
 #  - everything is linked into one executable, so position-independent code
 #    only costs registers and GOT loads on Broadway;
-#  - devkitPPC's GCC crashes in the LTO link step on the render engine, so the
-#    targets that request link-time optimization are compiled normally.
+#  - devkitPPC's GCC (15.2) crashes in the LTO link step (try_forward_edges,
+#    in the render engine, the image readers and the GX rasterizer among
+#    others), so the targets that request link-time optimization are compiled
+#    normally.
 function(ballance_wii_tune_targets directory)
     get_property(_targets DIRECTORY "${directory}" PROPERTY BUILDSYSTEM_TARGETS)
     foreach (_target IN LISTS _targets)
