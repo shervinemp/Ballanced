@@ -361,11 +361,11 @@ HOME (Start + Z on a GameCube controller) opens the HOME menu over the paused ga
 
 The game starts in the console's language when Ballance has it (German, English, Spanish, Italian or French) and in English otherwise; `Language` in `Player.ini` overrides it (0 German, 1 English, 2 Spanish, 3 Italian, 4 French).
 
-Every half minute `Player.log` records the frame rate, how each frame splits between work (game logic and drawing), waiting for the GPU and waiting for the TV, how many objects and triangles a frame draws, and how much memory is in use and free (every five seconds with `Verbose = 1`).
+Every half minute `Player.log` records the frame rate, how each frame splits between work (game logic and drawing), waiting for the GPU and waiting for the TV, the longest frame (loading included), how many objects and triangles a frame draws, and how much memory is in use and free (every five seconds with `Verbose = 1`).
 
 ### On-console tests
 
-`tests.dol` checks the memory available to the game, state chunk and file byte layouts, media readers and writers, sound playback, fonts, the game database, GX rasterizer output and the system screens drawn over it, building blocks, the on-screen keyboard, physics and a render engine scene, and writes a small demo composition to `sd:/apps/ballance-demo/base.cmo`. Copy it to `apps/wiitests/boot.dol` and start it; results appear on screen and in `sd:/wiitests.log`. In Dolphin, enable SD card folder sync and, under Graphics > Hacks, turn off "Skip EFB Access from CPU" and "Store EFB Copies to Texture Only" so the rasterizer checks can read the frame back. Turning on MMU emulation (Config > Advanced) makes invalid memory accesses fault as they would on a console instead of reading zeros. For the game itself, set Graphics > Advanced > Texture Cache Accuracy to Safe: the fast setting samples too few texels to notice each new frame of the intro movie.
+`tests.dol` checks the memory available to the game, state chunk and file byte layouts, media readers and writers, sound playback, fonts, the game database, GX rasterizer output and the system screens drawn over it, building blocks, the on-screen keyboard, physics and a render engine scene, and writes a small demo composition to `sd:/apps/ballance-demo/base.cmo`. Copy it to `apps/wiitests/boot.dol` and start it; results appear on screen and in `sd:/wiitests.log`. When `sd:/wiitests.autoexit` exists the tests leave without waiting for a button, for unattended runs. In Dolphin, enable SD card folder sync and, under Graphics > Hacks, turn off "Skip EFB Access from CPU" and "Store EFB Copies to Texture Only" so the rasterizer checks can read the frame back. Turning on MMU emulation (Config > Advanced) makes invalid memory accesses fault as they would on a console instead of reading zeros. For the game itself, set Graphics > Advanced > Texture Cache Accuracy to Safe: the fast setting samples too few texels to notice each new frame of the intro movie.
 
 ### When something goes wrong on the console
 
@@ -375,9 +375,53 @@ Every half minute `Player.log` records the frame rate, how each frame splits bet
 powerpc-eabi-addr2line -f -C -e build/wii/Source/WiiPlayer/boot.elf 0x80123456
 ```
 
-### Finding where the frame time goes
+### Benchmarks and profiles
 
-Dolphin can count the emulated CPU cycles each function takes. Start `boot.elf` rather than `boot.dol` so Dolphin loads its symbols, turn on Options > Configuration > Interface > Enable Debugging UI, then JIT > Enable JIT Block Profiling. Play to the scene in question, choose JIT > Wipe JIT Block Profiling Data, play on for half a minute and choose JIT > Write JIT Block Log Dump. The dump (`Dump/Debug/JitBlocks/` in Dolphin's user folder) is a tab-separated list of code blocks with their cycles and function names; add up the cycles column per function to rank them. Dolphin does not model the console's caches, so memory-bound code costs more on a Wii than the dump shows; the frame times in `Player.log` from a console are the final word.
+The game can play itself from a script, so a benchmark or a profile repeats the same way on a console and in Dolphin, with no controller. Put the script in the game folder and name it in `Player.ini`:
+
+```ini
+[Wii]
+Autoplay = bench.txt
+```
+
+Each line is a command (`#` starts a comment; the full list is in `Source/WiiPlayer/AutoplayScript.h`). Times are in frames, so loading, however long it takes, does not throw a script out of step. This one profiles the main menu, then starts Level 1, skips the tutorial, turns the view around and rolls the ball:
+
+```
+wait 240                       # the main menu is up
+report start
+profile start 500              # a sample every 500 microseconds
+wait 600
+profile stop menu.prof
+report stop                    # frame times since "report start", to Player.log
+hold 4 Enter                   # Start
+wait 180
+hold 4 Enter                   # Level 1
+wait 300
+hold 4 Q                       # skip the tutorial
+waitplay 1800                  # until the ball can be rolled
+wait 240
+hold 10 Left_Shift Left_Arrow  # turn the view twice
+wait 40
+hold 10 Left_Shift Left_Arrow
+wait 40
+report start
+profile start 500
+hold 600 Up_Arrow
+profile stop level1.prof
+report stop
+shot level1.tga                # the picture, to compare between builds
+quit
+```
+
+A profile records, a few thousand times a second, where the CPU is and the calls that led there, which phase of the frame it is in (game logic, drawing, waiting for the GPU or the TV, loading) and the frame number. `Source/WiiPlayer/tools/wii_profile.py` turns it into time per function with the symbols of the matching `boot.elf` (it needs `powerpc-eabi-nm` on the `PATH` or devkitPro installed):
+
+```bash
+python Source/WiiPlayer/tools/wii_profile.py build/wii/Source/WiiPlayer/boot.elf level1.prof --thread main
+```
+
+"Self" is time in a function's own code and "total" includes what it calls. `--phase draw` (or `logic`, `load`, ...) keeps one part of the frame, `--longest 5` keeps the five frames the game worked on longest, to see what causes a hitch, and `--callers NAME` and `--callees NAME` show who calls a function and what it calls. Samples are taken from a timer interrupt, so time spent with interrupts masked (inside the allocator, for instance) shows at the point where they come back on.
+
+To run a script in Dolphin without touching its window, start the ELF in batch mode with SD card folder sync on, e.g. `Dolphin.exe -u <user folder> -b -e boot.elf`: `quit` at the end of the script stops the emulation, which writes the SD card folder back with `Player.log`, the profiles and the pictures. A user folder of its own (`-u`) keeps the run's settings apart from your Dolphin's, and with no controller mapped there the script is the only input. Dolphin does not model the console's caches or the SD card's speed, so memory-bound code and loading cost more on a Wii than it shows; the figures from a console are the final word, and the same script and profiler run there.
 
 ## Troubleshooting
 

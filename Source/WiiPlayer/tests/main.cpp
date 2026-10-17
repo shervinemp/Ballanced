@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/stat.h>
 
 #include "CKAll.h"
 #include "StaticPlugins.h"
@@ -94,7 +95,10 @@ int main(int argc, char **argv)
     wiitest::Log("%s", summary + 2);
     wiitest::CloseLog();
 
-    wiisystem::ShowMessage(wiitest::FailureCount() == 0 ? "Tests passed" : "Tests FAILED", summary);
+    // Unattended runs (sd:/wiitests.autoexit exists) leave without waiting for a button.
+    struct stat autoexit;
+    if (!storage || stat("sd:/wiitests.autoexit", &autoexit) != 0)
+        wiisystem::ShowMessage(wiitest::FailureCount() == 0 ? "Tests passed" : "Tests FAILED", summary);
     wiisystem::Exit();
     return 0;
 }

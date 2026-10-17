@@ -1,5 +1,6 @@
 #include "CKGXRasterizer.h"
 
+#include "WiiProfiler.h"
 #include "WiiSystem.h"
 
 #include <ogc/lwp_watchdog.h>
@@ -134,13 +135,17 @@ void CKGXRasterizerContext::CopyToScreen()
     // Clear() draws its own quad, so the copy keeps the EFB: readbacks after
     // BackToFront see the frame just presented.
     GX_CopyDisp(m_FrameBuffers[m_FrameBuffer], GX_FALSE);
+    const wiiprofiler::Phase phase = wiiprofiler::GetPhase();
+    wiiprofiler::SetPhase(wiiprofiler::PHASE_GPU);
     const u64 submitted = gettime();
     GX_DrawDone();
     const u64 drawn = gettime();
     VIDEO_SetNextFramebuffer(m_FrameBuffers[m_FrameBuffer]);
     VIDEO_Flush();
     // The TV refresh paces the game, like a console title.
+    wiiprofiler::SetPhase(wiiprofiler::PHASE_VSYNC);
     VIDEO_WaitVSync();
+    wiiprofiler::SetPhase(phase);
     wiisystem::AddFrameWaits(drawn - submitted, gettime() - drawn);
 }
 

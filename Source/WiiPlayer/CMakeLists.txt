@@ -85,6 +85,8 @@ set(_console_link_options ${_path_wraps} "SHELL:-T \"${_dol_align}\"" "SHELL:-T 
 add_executable(WiiPlayer
         main.cpp
         ${_console_runtime}
+        AutoplayScript.cpp
+        AutoplayScript.h
         WiiGamePlayer.cpp
         WiiGamePlayer.h
         "${_player_src}/GameConfig.cpp"

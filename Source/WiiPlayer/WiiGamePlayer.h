@@ -3,6 +3,7 @@
 
 #include "CKAll.h"
 
+#include "AutoplayScript.h"
 #include "GameConfig.h"
 
 class CGameInfo;
@@ -22,10 +23,21 @@ public:
     void Run();
     void Shutdown();
 
+    // Plays from a script (see AutoplayScript.h).
+    bool LoadAutoplay(const char *path);
+
+    // Frame time figures for Player.log: counting starts anew, or the figures
+    // since then are logged.
+    void StartFrameReport();
+    void LogFrameReport();
+
+    CKRenderContext *GetRenderContext() const { return m_RenderContext; }
+
 private:
     bool InitEngine();
     bool SetupManagers();
     bool SetupPaths();
+    bool LoadComposition(const char *filename, const char *resolvedFile);
     bool FinishLoad(const char *filename, const char *resolvedFile);
     bool Update();
     void OpenHomeMenu();
@@ -45,6 +57,8 @@ private:
     // Since the last report
     unsigned long long m_ProcessTicks;
     unsigned long long m_RenderTicks;
+    unsigned long long m_FrameStart;   // When the current frame began
+    unsigned long long m_LongestFrame; // Ticks
     unsigned int m_Objects;
     unsigned int m_Triangles;
 
@@ -53,6 +67,8 @@ private:
     CKRenderManager *m_RenderManager;
     CKTimeManager *m_TimeManager;
     CKMessageManager *m_MessageManager;
+
+    AutoplayScript m_Autoplay;
 };
 
 #endif // WIIGAMEPLAYER_H

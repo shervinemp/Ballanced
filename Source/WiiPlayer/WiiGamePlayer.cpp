@@ -10,6 +10,7 @@
 #include "Logger.h"
 #include "StaticPlugins.h"
 #include "Utils.h"
+#include "WiiProfiler.h"
 #include "WiiSystem.h"
 
 extern bool EditScript(CKLevel *level, const CGameConfig &config, const char *resolvedFile);
@@ -152,6 +153,8 @@ WiiGamePlayer::WiiGamePlayer()
       m_LastReport(0),
       m_ProcessTicks(0),
       m_RenderTicks(0),
+      m_FrameStart(0),
+      m_LongestFrame(0),
       m_Objects(0),
       m_Triangles(0),
       m_CKContext(NULL),
@@ -311,11 +314,26 @@ bool WiiGamePlayer::Load(const char *filename)
     m_RenderContext->BackToFront(CK_RENDER_DOBACKTOFRONT);
     wiisystem::SetOverlay(wiisystem::OVERLAY_NOTICE, NULL, 0);
 
+    const wiiprofiler::Phase phase = wiiprofiler::GetPhase();
+    wiiprofiler::SetPhase(wiiprofiler::PHASE_LOAD);
+    const bool loaded = LoadComposition(filename, resolvedFile.CStr());
+    wiiprofiler::SetPhase(phase);
+    if (!loaded)
+        return false;
+
+    LogMemory("after loading");
+    StartReport(gettime());
+    m_CKContext->Play();
+    return true;
+}
+
+bool WiiGamePlayer::LoadComposition(const char *filename, const char *resolvedFile)
+{
     m_CKContext->Reset();
     m_CKContext->ClearAll();
 
     CKFile *file = m_CKContext->CreateCKFile();
-    CKERROR res = file->OpenFile(resolvedFile.Str(), (CK_LOAD_FLAGS)(CK_LOAD_DEFAULT | CK_LOAD_CHECKDEPENDENCIES));
+    CKERROR res = file->OpenFile((CKSTRING)resolvedFile, (CK_LOAD_FLAGS)(CK_LOAD_DEFAULT | CK_LOAD_CHECKDEPENDENCIES));
     if (res != CK_OK)
     {
         if (res == CKERR_PLUGINSMISSING)
@@ -331,7 +349,7 @@ bool WiiGamePlayer::Load(const char *filename)
             }
         }
         m_CKContext->DeleteCKFile(file);
-        CLogger::Get().Error("Failed to open %s (%d)", resolvedFile.CStr(), res);
+        CLogger::Get().Error("Failed to open %s (%d)", resolvedFile, res);
         return false;
     }
 
@@ -341,17 +359,10 @@ bool WiiGamePlayer::Load(const char *filename)
     DeleteCKObjectArray(array);
     if (res != CK_OK)
     {
-        CLogger::Get().Error("Failed to load %s (%d)", resolvedFile.CStr(), res);
+        CLogger::Get().Error("Failed to load %s (%d)", resolvedFile, res);
         return false;
     }
-
-    if (!FinishLoad(filename, resolvedFile.CStr()))
-        return false;
-
-    LogMemory("after loading");
-    StartReport(gettime());
-    m_CKContext->Play();
-    return true;
+    return FinishLoad(filename, resolvedFile);
 }
 
 bool WiiGamePlayer::FinishLoad(const char *filename, const char *resolvedFile)
@@ -426,10 +437,20 @@ bool WiiGamePlayer::Update()
     // game. Following the time manager's frame rate limit as well (60 Hz in
     // Ballance) would beat against the TV's 59.94 or 50 Hz and drop frames.
     m_TimeManager->ResetChronos(TRUE, TRUE);
+    if (m_Autoplay.IsActive())
+        m_Autoplay.Update(*this);
     const u64 start = gettime();
+    // Frame to frame, so loading and other long frames count in full.
+    if (m_FrameStart != 0 && start - m_FrameStart > m_LongestFrame)
+        m_LongestFrame = start - m_FrameStart;
+    m_FrameStart = start;
+    wiiprofiler::NextFrame();
+    wiiprofiler::SetPhase(wiiprofiler::PHASE_LOGIC);
     m_CKContext->Process();
     const u64 processed = gettime();
+    wiiprofiler::SetPhase(wiiprofiler::PHASE_DRAW);
     m_RenderContext->Render();
+    wiiprofiler::SetPhase(wiiprofiler::PHASE_OTHER);
     m_ProcessTicks += processed - start;
     m_RenderTicks += gettime() - processed;
     VxStats stats;
@@ -459,15 +480,32 @@ void WiiGamePlayer::LogPerformance()
         // Rendering waits for the GPU and the TV at the end of the frame.
         const float drawing = ticks_to_microsecs(m_RenderTicks) / 1000.0f / frames - gpuWait - tvWait;
         CLogger::Get().Info("Frames: %.1f per second, %.1f ms each: %.1f ms busy (%.1f game, %.1f drawing), "
-                            "%.1f ms waiting for the GPU, %.1f ms for the TV; %u objects, %u triangles",
+                            "%.1f ms waiting for the GPU, %.1f ms for the TV; longest %.1f ms; %u objects, "
+                            "%u triangles",
                             frames * 1000.0f / elapsed, frame, frame - gpuWait - tvWait, logic, drawing, gpuWait,
-                            tvWait, m_Objects / frames, m_Triangles / frames);
+                            tvWait, ticks_to_microsecs(m_LongestFrame) / 1000.0f, m_Objects / frames,
+                            m_Triangles / frames);
     }
     StartReport(now);
     LogMemory("while playing");
 
     if (m_Config.verbose)
         LogRunningBlocks(m_CKContext);
+}
+
+bool WiiGamePlayer::LoadAutoplay(const char *path)
+{
+    return m_CKContext && m_Autoplay.Load(path, m_CKContext);
+}
+
+void WiiGamePlayer::StartFrameReport()
+{
+    StartReport(gettime());
+}
+
+void WiiGamePlayer::LogFrameReport()
+{
+    LogPerformance();
 }
 
 // Starts a new report period; with no start time the next report is skipped.
@@ -477,6 +515,9 @@ void WiiGamePlayer::StartReport(unsigned long long now)
     m_LastReport = now;
     m_ReportFrame = m_FrameCount;
     m_ProcessTicks = m_RenderTicks = 0;
+    m_LongestFrame = 0;
+    if (now == 0)
+        m_FrameStart = 0; // Paused: the next frame starts the count afresh
     m_Objects = m_Triangles = 0;
 }
 

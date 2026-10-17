@@ -1,6 +1,7 @@
 #include "WiiInputManager.h"
 
 #include "VxWiiPlatform.h"
+#include "WiiAutoplay.h"
 #include "WiiSystem.h"
 
 #include <gccore.h>
@@ -294,6 +295,12 @@ CKERROR WiiInputManager::PreProcess()
     memset(wanted, 0, sizeof(wanted));
     PollControllers(wanted, now);
     m_KeyBindings.Apply(wanted);
+    // An autoplay script types like a keyboard.
+    if (const u8 *scripted = wiiautoplay::GetKeys())
+    {
+        for (CKDWORD key = 0; key < WII_KEYBOARD_SIZE; ++key)
+            wanted[key] |= scripted[key];
+    }
 
     for (CKDWORD key = 0; key < WII_KEYBOARD_SIZE; ++key)
     {
@@ -868,6 +875,7 @@ void WiiInputManager::UpdatePlayState()
         if (KeyAskedWithin(m_KeyBindings.GetKey((WiiKeyBindings::Control)control), kAskFrames))
             m_BallInPlay = TRUE;
     }
+    wiiautoplay::SetGamePlaying(m_InPlay != FALSE);
 }
 
 CKBOOL WiiInputManager::IsMouseButtonDown(CK_MOUSEBUTTON iButton)

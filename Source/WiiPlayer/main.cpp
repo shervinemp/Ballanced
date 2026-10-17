@@ -92,6 +92,11 @@ int main(int argc, char **argv)
         }
         else
         {
+            // A script can play the game for benchmarks (AutoplayScript.h).
+            char autoplay[256];
+            if (haveIni && utils::IniGetString("Wii", "Autoplay", autoplay, sizeof(autoplay), iniPath.CStr()) &&
+                autoplay[0])
+                player.LoadAutoplay(utils::JoinPath(gamePath, autoplay).CStr());
             player.Run();
         }
         player.Shutdown();
