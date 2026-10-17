@@ -236,11 +236,21 @@ namespace
 
 void CKGXRasterizerContext::ApplyTransforms(CKBOOL pretransformed)
 {
+    AppliedState &applied = m_Applied;
     if (pretransformed)
     {
+        const int targetWidth = m_Target ? m_TargetWidth : m_Width;
+        const int targetHeight = m_Target ? m_TargetHeight : m_Height;
+        if (applied.Transform == TRANSFORM_SCREEN && applied.ScreenWidth == targetWidth &&
+            applied.ScreenHeight == targetHeight)
+            return;
+        applied.Transform = TRANSFORM_SCREEN;
+        applied.ScreenWidth = targetWidth;
+        applied.ScreenHeight = targetHeight;
+
         // Screen-space vertices: pixels to clip space, depth 0..1 to -1..0.
-        const float width = (float)(m_Target ? m_TargetWidth : m_Width);
-        const float height = (float)(m_Target ? m_TargetHeight : m_Height);
+        const float width = (float)targetWidth;
+        const float height = (float)targetHeight;
         Mtx44 ortho = {
             {2.0f / width, 0.0f, 0.0f, -1.0f},
             {0.0f, -2.0f / height, 0.0f, 1.0f},
@@ -256,16 +266,33 @@ void CKGXRasterizerContext::ApplyTransforms(CKBOOL pretransformed)
         return;
     }
 
-    Mtx44 projection;
-    const u8 type = ToGXProjection(m_Matrices[CKRSTMatrixSlot(VXMATRIX_PROJECTION)], projection);
-    GX_LoadProjectionMtx(projection, type);
-
-    Mtx modelView, normal;
-    ToGXModelView(m_Matrices[CKRSTMatrixSlot(VXMATRIX_WORLD)], m_Matrices[CKRSTMatrixSlot(VXMATRIX_VIEW)], modelView);
-    ToGXNormalMatrix(modelView, normal);
-    GX_LoadPosMtxImm(modelView, GX_PNMTX0);
-    GX_LoadNrmMtxImm(normal, GX_PNMTX0);
-    GX_SetCurrentMtx(GX_PNMTX0);
+    // Meshes drawn in several parts, and objects sharing a matrix, keep the
+    // matrices of the draw before.
+    const VxMatrix &projectionMatrix = m_Matrices[CKRSTMatrixSlot(VXMATRIX_PROJECTION)];
+    const VxMatrix &world = m_Matrices[CKRSTMatrixSlot(VXMATRIX_WORLD)];
+    const VxMatrix &view = m_Matrices[CKRSTMatrixSlot(VXMATRIX_VIEW)];
+    const bool known = applied.Transform == TRANSFORM_WORLD;
+    if (!known || memcmp(&applied.Projection, &projectionMatrix, sizeof(VxMatrix)) != 0)
+    {
+        Mtx44 projection;
+        const u8 type = ToGXProjection(projectionMatrix, projection);
+        GX_LoadProjectionMtx(projection, type);
+        applied.Projection = projectionMatrix;
+    }
+    if (!known || memcmp(&applied.World, &world, sizeof(VxMatrix)) != 0 ||
+        memcmp(&applied.View, &view, sizeof(VxMatrix)) != 0)
+    {
+        Mtx modelView, normal;
+        ToGXModelView(world, view, modelView);
+        ToGXNormalMatrix(modelView, normal);
+        GX_LoadPosMtxImm(modelView, GX_PNMTX0);
+        GX_LoadNrmMtxImm(normal, GX_PNMTX0);
+        applied.World = world;
+        applied.View = view;
+    }
+    if (!known)
+        GX_SetCurrentMtx(GX_PNMTX0);
+    applied.Transform = TRANSFORM_WORLD;
 
     if (m_RenderStates[VXRENDERSTATE_VERTEXBLEND] != 0)
         Diag(CKRST_DIAG_APPROX_VERTEX_BLEND_WEIGHTS);
@@ -349,15 +376,20 @@ void CKGXRasterizerContext::ApplyChannels(const VertexSource &source, CKBOOL pre
     const CKBOOL lighting = m_RenderStates[VXRENDERSTATE_LIGHTING] && hasNormals;
     const CKBOOL vertexColor = source.Diffuse != NULL;
 
-    GX_SetNumChans(1);
     if (!lighting)
     {
         // Unlit: vertex colour, or white.
+        *litOut = FALSE;
+        const u8 key[16] = {1, (u8)(vertexColor ? 1 : 0)};
+        if (m_Applied.ChannelsValid && memcmp(m_Applied.ChannelKey, key, sizeof(key)) == 0)
+            return;
+        memcpy(m_Applied.ChannelKey, key, sizeof(key));
+        m_Applied.ChannelsValid = true;
         GXColor white = {255, 255, 255, 255};
+        GX_SetNumChans(1);
         GX_SetChanCtrl(GX_COLOR0A0, GX_DISABLE, GX_SRC_REG, vertexColor ? GX_SRC_VTX : GX_SRC_REG,
                        GX_LIGHTNULL, GX_DF_NONE, GX_AF_NONE);
         GX_SetChanMatColor(GX_COLOR0A0, white);
-        *litOut = FALSE;
         return;
     }
 
@@ -376,13 +408,6 @@ void CKGXRasterizerContext::ApplyChannels(const VertexSource &source, CKBOOL pre
 
     const CKBOOL diffuseFromVertex = vertexColor && m_RenderStates[VXRENDERSTATE_COLORVERTEX] &&
                                      m_RenderStates[VXRENDERSTATE_DIFFUSEFROMVERTEX];
-    GX_SetChanCtrl(GX_COLOR0, GX_ENABLE, GX_SRC_REG, diffuseFromVertex ? GX_SRC_VTX : GX_SRC_REG, lightMask,
-                   GX_DF_CLAMP, GX_AF_SPOT);
-    GX_SetChanCtrl(GX_ALPHA0, GX_DISABLE, GX_SRC_REG, diffuseFromVertex ? GX_SRC_VTX : GX_SRC_REG,
-                   GX_LIGHTNULL, GX_DF_NONE, GX_AF_NONE);
-    GX_SetChanMatColor(GX_COLOR0A0, ToGXColor(m_Material.Diffuse));
-    GXColor black = {0, 0, 0, 0};
-    GX_SetChanAmbColor(GX_COLOR0A0, black);
 
     // Direct3D adds emissive and ambient light outside the diffuse term; GX
     // multiplies its ambient by the material, so the TEV adds this instead.
@@ -392,11 +417,28 @@ void CKGXRasterizerContext::ApplyChannels(const VertexSource &source, CKBOOL pre
     ambient.g = m_Material.Emissive.g + m_Material.Ambient.g * (((globalAmbient >> 8) & 0xFF) / 255.0f + lightAmbient.g);
     ambient.b = m_Material.Emissive.b + m_Material.Ambient.b * ((globalAmbient & 0xFF) / 255.0f + lightAmbient.b);
     ambient.a = 0.0f;
-    GX_SetTevKColor(GX_KCOLOR3, ToGXColor(ambient));
 
     if (m_RenderStates[VXRENDERSTATE_SPECULARENABLE])
         Diag(CKRST_DIAG_APPROX_TEXTURE_OP);
     *litOut = TRUE;
+
+    const GXColor material = ToGXColor(m_Material.Diffuse);
+    const GXColor ambientColor = ToGXColor(ambient);
+    const u8 key[16] = {2, (u8)(diffuseFromVertex ? 1 : 0), lightMask, material.r, material.g, material.b, material.a,
+                        ambientColor.r, ambientColor.g, ambientColor.b, ambientColor.a};
+    if (m_Applied.ChannelsValid && memcmp(m_Applied.ChannelKey, key, sizeof(key)) == 0)
+        return;
+    memcpy(m_Applied.ChannelKey, key, sizeof(key));
+    m_Applied.ChannelsValid = true;
+    GX_SetNumChans(1);
+    GX_SetChanCtrl(GX_COLOR0, GX_ENABLE, GX_SRC_REG, diffuseFromVertex ? GX_SRC_VTX : GX_SRC_REG, lightMask,
+                   GX_DF_CLAMP, GX_AF_SPOT);
+    GX_SetChanCtrl(GX_ALPHA0, GX_DISABLE, GX_SRC_REG, diffuseFromVertex ? GX_SRC_VTX : GX_SRC_REG,
+                   GX_LIGHTNULL, GX_DF_NONE, GX_AF_NONE);
+    GX_SetChanMatColor(GX_COLOR0A0, material);
+    GXColor black = {0, 0, 0, 0};
+    GX_SetChanAmbColor(GX_COLOR0A0, black);
+    GX_SetTevKColor(GX_KCOLOR3, ambientColor);
 }
 
 // ---------------------------------------------------------------------------
@@ -771,46 +813,82 @@ int CKGXRasterizerContext::ApplyTextureStages(const VertexSource &source, CKBOOL
 void CKGXRasterizerContext::ApplyPixelState(CKBOOL pretransformed)
 {
     const CKDWORD *rs = m_RenderStates;
+    // Each group of registers is sent when it differs from the last draw's.
+    AppliedState &applied = m_Applied;
+    const bool known = applied.PixelValid;
+    applied.PixelValid = true;
 
-    GX_SetZMode(rs[VXRENDERSTATE_ZENABLE] ? GX_TRUE : GX_FALSE, CompareFunction(rs[VXRENDERSTATE_ZFUNC]),
-                rs[VXRENDERSTATE_ZWRITEENABLE] ? GX_TRUE : GX_FALSE);
+    const u8 zMode[3] = {(u8)(rs[VXRENDERSTATE_ZENABLE] ? GX_TRUE : GX_FALSE), CompareFunction(rs[VXRENDERSTATE_ZFUNC]),
+                         (u8)(rs[VXRENDERSTATE_ZWRITEENABLE] ? GX_TRUE : GX_FALSE)};
+    if (!known || memcmp(applied.ZMode, zMode, sizeof(zMode)) != 0)
+    {
+        GX_SetZMode(zMode[0], zMode[1], zMode[2]);
+        memcpy(applied.ZMode, zMode, sizeof(zMode));
+    }
 
-    const CKBOOL alphaTest = rs[VXRENDERSTATE_ALPHATESTENABLE] != 0;
-    if (alphaTest)
-        GX_SetAlphaCompare(CompareFunction(rs[VXRENDERSTATE_ALPHAFUNC]), (u8)(rs[VXRENDERSTATE_ALPHAREF] & 0xFF),
-                           GX_AOP_AND, GX_ALWAYS, 0);
-    else
-        GX_SetAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0);
     // Depth must be tested after the TEV when alpha testing, or rejected
     // pixels would still write depth.
-    GX_SetZCompLoc(alphaTest ? GX_FALSE : GX_TRUE);
+    const CKBOOL alphaTest = rs[VXRENDERSTATE_ALPHATESTENABLE] != 0;
+    const u8 alphaCompare[3] = {(u8)(alphaTest ? CompareFunction(rs[VXRENDERSTATE_ALPHAFUNC]) : GX_ALWAYS),
+                                (u8)(alphaTest ? (rs[VXRENDERSTATE_ALPHAREF] & 0xFF) : 0),
+                                (u8)(alphaTest ? GX_FALSE : GX_TRUE)};
+    if (!known || memcmp(applied.AlphaCompare, alphaCompare, sizeof(alphaCompare)) != 0)
+    {
+        GX_SetAlphaCompare(alphaCompare[0], alphaCompare[1], GX_AOP_AND, GX_ALWAYS, 0);
+        GX_SetZCompLoc(alphaCompare[2]);
+        memcpy(applied.AlphaCompare, alphaCompare, sizeof(alphaCompare));
+    }
 
+    u8 blend[4] = {GX_BM_NONE, GX_BL_ONE, GX_BL_ZERO, GX_LO_CLEAR};
     if (rs[VXRENDERSTATE_ALPHABLENDENABLE])
-        GX_SetBlendMode(GX_BM_BLEND, SourceBlend(rs[VXRENDERSTATE_SRCBLEND]),
-                        DestinationBlend(rs[VXRENDERSTATE_DESTBLEND], rs[VXRENDERSTATE_SRCBLEND]), GX_LO_CLEAR);
-    else
-        GX_SetBlendMode(GX_BM_NONE, GX_BL_ONE, GX_BL_ZERO, GX_LO_CLEAR);
+    {
+        blend[0] = GX_BM_BLEND;
+        blend[1] = SourceBlend(rs[VXRENDERSTATE_SRCBLEND]);
+        blend[2] = DestinationBlend(rs[VXRENDERSTATE_DESTBLEND], rs[VXRENDERSTATE_SRCBLEND]);
+    }
+    if (!known || memcmp(applied.Blend, blend, sizeof(blend)) != 0)
+    {
+        GX_SetBlendMode(blend[0], blend[1], blend[2], blend[3]);
+        memcpy(applied.Blend, blend, sizeof(blend));
+    }
 
     const CKDWORD colorWrite = rs[VXRENDERSTATE_COLORWRITEENABLE];
-    GX_SetColorUpdate((colorWrite & (CKRST_COLORWRITE_RED | CKRST_COLORWRITE_GREEN | CKRST_COLORWRITE_BLUE)) ? GX_TRUE : GX_FALSE);
-    GX_SetAlphaUpdate((colorWrite & CKRST_COLORWRITE_ALPHA) ? GX_TRUE : GX_FALSE);
+    const u8 updates[2] = {
+        (u8)((colorWrite & (CKRST_COLORWRITE_RED | CKRST_COLORWRITE_GREEN | CKRST_COLORWRITE_BLUE)) ? GX_TRUE : GX_FALSE),
+        (u8)((colorWrite & CKRST_COLORWRITE_ALPHA) ? GX_TRUE : GX_FALSE)};
+    if (!known || memcmp(applied.Updates, updates, sizeof(updates)) != 0)
+    {
+        GX_SetColorUpdate(updates[0]);
+        GX_SetAlphaUpdate(updates[1]);
+        memcpy(applied.Updates, updates, sizeof(updates));
+    }
 
     // Both APIs see clockwise triangles as front facing.
     CKDWORD cull = rs[VXRENDERSTATE_CULLMODE];
     if (rs[VXRENDERSTATE_INVERSEWINDING])
         cull = (cull == VXCULL_CW) ? VXCULL_CCW : (cull == VXCULL_CCW ? VXCULL_CW : cull);
-    if (cull == VXCULL_CCW)
-        GX_SetCullMode(GX_CULL_BACK);
-    else if (cull == VXCULL_CW)
-        GX_SetCullMode(GX_CULL_FRONT);
-    else
-        GX_SetCullMode(GX_CULL_NONE);
+    const u8 cullMode = cull == VXCULL_CCW ? GX_CULL_BACK : (cull == VXCULL_CW ? GX_CULL_FRONT : GX_CULL_NONE);
+    if (!known || applied.Cull != cullMode)
+    {
+        GX_SetCullMode(cullMode);
+        applied.Cull = cullMode;
+    }
 
-    GX_SetDither(rs[VXRENDERSTATE_DITHERENABLE] ? GX_ENABLE : GX_DISABLE);
+    const u8 dither = rs[VXRENDERSTATE_DITHERENABLE] ? GX_ENABLE : GX_DISABLE;
+    if (!known || applied.Dither != dither)
+    {
+        GX_SetDither(dither);
+        applied.Dither = dither;
+    }
 
     const float pointSize = AsFloat(rs[VXRENDERSTATE_POINTSIZE]);
-    GX_SetPointSize((u8)(pointSize > 0.0f && pointSize < 42.0f ? pointSize * 6.0f : 6.0f), GX_TO_ZERO);
-    GX_SetLineWidth(6, GX_TO_ZERO);
+    const u8 pointWidth = (u8)(pointSize > 0.0f && pointSize < 42.0f ? pointSize * 6.0f : 6.0f);
+    if (!known || applied.PointSize != pointWidth)
+    {
+        GX_SetPointSize(pointWidth, GX_TO_ZERO);
+        GX_SetLineWidth(6, GX_TO_ZERO);
+        applied.PointSize = pointWidth;
+    }
 
     // Fog, in eye-space depth. GX derives it from the depth value, so it needs
     // the near and far planes of a perspective (w = z) or orthographic
@@ -837,12 +915,24 @@ void CKGXRasterizerContext::ApplyPixelState(CKBOOL pretransformed)
             else
                 type = fogMode == VXFOG_EXP ? GX_FOG_ORTHO_EXP : GX_FOG_ORTHO_EXP2;
         }
-        GX_SetFog(type, start, end, zNear, zFar, ToGXColor(rs[VXRENDERSTATE_FOGCOLOR]));
+        const GXColor color = ToGXColor(rs[VXRENDERSTATE_FOGCOLOR]);
+        if (!known || applied.FogType != type || applied.Fog[0] != start || applied.Fog[1] != end ||
+            applied.Fog[2] != zNear || applied.Fog[3] != zFar || memcmp(&applied.FogColor, &color, sizeof(color)) != 0)
+        {
+            GX_SetFog(type, start, end, zNear, zFar, color);
+            applied.FogType = type;
+            applied.Fog[0] = start;
+            applied.Fog[1] = end;
+            applied.Fog[2] = zNear;
+            applied.Fog[3] = zFar;
+            applied.FogColor = color;
+        }
     }
-    else
+    else if (!known || applied.FogType != GX_FOG_NONE)
     {
         GXColor none = {0, 0, 0, 0};
         GX_SetFog(GX_FOG_NONE, 0.0f, 1.0f, 0.1f, 1.0f, none);
+        applied.FogType = GX_FOG_NONE;
     }
 
     if (rs[VXRENDERSTATE_STENCILENABLE])
@@ -869,9 +959,17 @@ void CKGXRasterizerContext::ApplyViewport(CKBOOL pretransformed)
     if (y + h > targetHeight)
         h = targetHeight - y;
 
-    if (pretransformed)
-        GX_SetViewport(0.0f, 0.0f, (f32)targetWidth, (f32)targetHeight, 0.0f, 1.0f);
-    else
-        GX_SetViewport((f32)x, (f32)y, (f32)w, (f32)h, m_Viewport.ViewZMin, m_Viewport.ViewZMax);
-    GX_SetScissor(x, y, w > 0 ? w : 0, h > 0 ? h : 0);
+    const f32 viewport[6] = {
+        pretransformed ? 0.0f : (f32)x, pretransformed ? 0.0f : (f32)y,
+        (f32)(pretransformed ? targetWidth : w), (f32)(pretransformed ? targetHeight : h),
+        pretransformed ? 0.0f : m_Viewport.ViewZMin, pretransformed ? 1.0f : m_Viewport.ViewZMax};
+    const u32 scissor[4] = {(u32)x, (u32)y, (u32)(w > 0 ? w : 0), (u32)(h > 0 ? h : 0)};
+    if (m_Applied.ViewportValid && memcmp(m_Applied.Viewport, viewport, sizeof(viewport)) == 0 &&
+        memcmp(m_Applied.Scissor, scissor, sizeof(scissor)) == 0)
+        return;
+    GX_SetViewport(viewport[0], viewport[1], viewport[2], viewport[3], viewport[4], viewport[5]);
+    GX_SetScissor(scissor[0], scissor[1], scissor[2], scissor[3]);
+    memcpy(m_Applied.Viewport, viewport, sizeof(viewport));
+    memcpy(m_Applied.Scissor, scissor, sizeof(scissor));
+    m_Applied.ViewportValid = true;
 }

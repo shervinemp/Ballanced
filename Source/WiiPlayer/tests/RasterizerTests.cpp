@@ -314,6 +314,140 @@ namespace
         ctx->DeleteObject(ib, CKRST_OBJ_INDEXBUFFER);
     }
 
+    // Index buffers are drawn from display lists recorded from their indices;
+    // writing new indices must replace the lists, and draws already queued
+    // keep the old ones.
+    void TestIndexBufferLists(CKRasterizerContext *ctx)
+    {
+        CKRSTVertexLayout layout;
+        layout.Stride = CKRSTGetVertexLayout(CKRST_DP_TR_VC, NULL, &layout);
+        const VxVector small[3] = {VxVector(-0.3f, -0.3f, 0.5f), VxVector(0.3f, -0.3f, 0.5f), VxVector(0.0f, 0.3f, 0.5f)};
+        const CKDWORD red[3] = {0xFFFF0000, 0xFFFF0000, 0xFFFF0000};
+        const CKDWORD green[3] = {0xFF00FF00, 0xFF00FF00, 0xFF00FF00};
+        CKBYTE vertices[6 * 64];
+        WriteColoredVertices(vertices, layout, small, red, 3, -0.5f);
+        WriteColoredVertices(vertices + 3 * layout.Stride, layout, small, green, 3, 0.5f);
+
+        CKVertexBufferDesc vbDesc;
+        vbDesc.m_Flags = CKRST_VB_VALID;
+        vbDesc.m_VertexFormat = CKRST_DP_TR_VC;
+        vbDesc.m_MaxVertexCount = 6;
+        CKDWORD vb = 0;
+        WT_CHECK(ctx->CreateVertexBuffer(&vbDesc, vertices, &vb) && vb, "CreateVertexBuffer for display lists");
+        CKIndexBufferDesc ibDesc;
+        ibDesc.m_Flags = CKRST_VB_VALID;
+        ibDesc.m_MaxIndexCount = 3;
+        const CKWORD left[3] = {0, 1, 2};
+        const CKWORD right[3] = {3, 4, 5};
+        CKDWORD ib = 0;
+        WT_CHECK(ctx->CreateIndexBuffer(&ibDesc, left, &ib) && ib, "CreateIndexBuffer for display lists");
+        SetDiffuseState(ctx);
+
+        // Recorded the first time, called the second.
+        for (int frame = 0; frame < 2; ++frame)
+        {
+            BeginFrame(ctx, 0xFF000000);
+            ctx->DrawPrimitiveVBIB(VX_TRIANGLELIST, vb, ib, 0, 6, 0, 3);
+            EndFrame(ctx);
+            EXPECT_PIXEL(ctx, 160, 240, 255, 0, 0, "indexed draw, left triangle");
+            EXPECT_PIXEL(ctx, 480, 240, 0, 0, 0, "indexed draw, right side clear");
+        }
+
+        // New indices replace the list: sent directly in the frame they are
+        // written, recorded again in the next one.
+        for (int frame = 0; frame < 2; ++frame)
+        {
+            BeginFrame(ctx, 0xFF000000);
+            if (frame == 0)
+            {
+                CKWORD *indices = (CKWORD *)ctx->LockIndexBuffer(ib, 0, 3, CKRST_LOCK_DISCARD);
+                WT_CHECK(indices != NULL, "LockIndexBuffer");
+                if (indices)
+                {
+                    memcpy(indices, right, sizeof(right));
+                    ctx->UnlockIndexBuffer(ib);
+                }
+            }
+            ctx->DrawPrimitiveVBIB(VX_TRIANGLELIST, vb, ib, 0, 6, 0, 3);
+            EndFrame(ctx);
+            EXPECT_PIXEL(ctx, 160, 240, 0, 0, 0, "rewritten indices, left side clear");
+            EXPECT_PIXEL(ctx, 480, 240, 0, 255, 0, "rewritten indices, right triangle");
+        }
+
+        // Rewritten between two draws of a frame: the first keeps its list.
+        BeginFrame(ctx, 0xFF000000);
+        ctx->DrawPrimitiveVBIB(VX_TRIANGLELIST, vb, ib, 0, 6, 0, 3);
+        CKWORD *indices = (CKWORD *)ctx->LockIndexBuffer(ib, 0, 3, CKRST_LOCK_DISCARD);
+        if (indices)
+        {
+            memcpy(indices, left, sizeof(left));
+            ctx->UnlockIndexBuffer(ib);
+        }
+        ctx->DrawPrimitiveVBIB(VX_TRIANGLELIST, vb, ib, 0, 6, 0, 3);
+        // Deleted while its list is queued: freed once the frame is drawn.
+        ctx->DeleteObject(ib, CKRST_OBJ_INDEXBUFFER);
+        EndFrame(ctx);
+        EXPECT_PIXEL(ctx, 160, 240, 255, 0, 0, "second draw sees the new indices");
+        EXPECT_PIXEL(ctx, 480, 240, 0, 255, 0, "first draw keeps its display list");
+        ctx->DeleteObject(vb, CKRST_OBJ_VERTEXBUFFER);
+    }
+
+    // Indexed draws from engine memory that reuse many vertices go through a
+    // per-frame staging area as GX arrays; the area is reused once the GPU
+    // has drawn the frame.
+    void TestStagedDraws(CKRasterizerContext *ctx)
+    {
+        // A quad of 4 used vertices among 40, drawn with 84 indices.
+        VxVector positions[40];
+        CKDWORD colors[40];
+        for (int i = 0; i < 40; ++i)
+        {
+            positions[i] = VxVector(0.0f, 0.0f, 0.5f);
+            colors[i] = 0xFF000000;
+        }
+        CKWORD indices[84];
+        for (int i = 0; i < 84; i += 6)
+        {
+            const CKWORD quad[6] = {0, 1, 2, 0, 2, 3};
+            memcpy(indices + i, quad, sizeof(quad));
+        }
+        VxDrawPrimitiveData data;
+        memset(&data, 0, sizeof(data));
+        data.VertexCount = 40;
+        data.Flags = CKRST_DP_TR_VC;
+        data.PositionPtr = positions;
+        data.PositionStride = sizeof(VxVector);
+        data.ColorPtr = colors;
+        data.ColorStride = sizeof(CKDWORD);
+        SetDiffuseState(ctx);
+
+        for (int frame = 0; frame < 2; ++frame)
+        {
+            BeginFrame(ctx, 0xFF000000);
+            // Left half red, then right half in the frame's colour, the vertex
+            // memory rewritten in between.
+            const float halves[2][2] = {{-0.9f, -0.1f}, {0.1f, 0.9f}};
+            for (int half = 0; half < 2; ++half)
+            {
+                const CKDWORD color = half == 0 ? 0xFFFF0000 : (frame == 0 ? 0xFF00FF00 : 0xFF0000FF);
+                positions[0] = VxVector(halves[half][0], 0.5f, 0.5f);
+                positions[1] = VxVector(halves[half][1], 0.5f, 0.5f);
+                positions[2] = VxVector(halves[half][1], -0.5f, 0.5f);
+                positions[3] = VxVector(halves[half][0], -0.5f, 0.5f);
+                for (int i = 0; i < 4; ++i)
+                    colors[i] = color;
+                WT_CHECK(ctx->DrawPrimitive(VX_TRIANGLELIST, indices, 84, &data), "staged DrawPrimitive");
+            }
+            EndFrame(ctx);
+            EXPECT_PIXEL(ctx, 160, 240, 255, 0, 0, "staged draw, left half");
+            if (frame == 0)
+                EXPECT_PIXEL(ctx, 480, 240, 0, 255, 0, "second staged draw of the frame");
+            else
+                EXPECT_PIXEL(ctx, 480, 240, 0, 0, 255, "staged draw after the area starts over");
+            EXPECT_PIXEL(ctx, 320, 60, 0, 0, 0, "outside the staged quads");
+        }
+    }
+
     // The copy CKRenderContextStateGuard takes on the Wii.
     void TestGuardedState(CKRasterizerContext *ctx)
     {
@@ -804,6 +938,8 @@ void RunRasterizerTests()
     TestClearAndOrientation(ctx);
     TestShading(ctx);
     TestVertexBuffers(ctx);
+    TestIndexBufferLists(ctx);
+    TestStagedDraws(ctx);
     TestGuardedState(ctx);
     TestCulling(ctx);
     TestDepth(ctx);

@@ -1,5 +1,5 @@
 // Vertex submission through the GX FIFO: vertex buffers as indexed GX arrays,
-// engine memory in immediate mode.
+// engine memory in immediate mode or staged as arrays.
 
 #include "CKGXRasterizer.h"
 
@@ -7,6 +7,7 @@
 
 #include <malloc.h>
 #include <math.h>
+#include <stdint.h>
 #include <string.h>
 
 // libogc's console font: 256 characters of 8x16 pixels, one byte per row,
@@ -102,6 +103,200 @@ namespace
     {
         return (argb << 8) | (argb >> 24);
     }
+
+    // Display lists recorded from index buffers, all buffers together. A level
+    // needs a few hundred kilobytes.
+    const u32 kMaxDisplayListBytes = 8 * 1024 * 1024;
+
+    // Vertices of indexed draws from engine memory, per frame. Draws of fewer
+    // vertices, or that use each vertex about once, are sent directly.
+    const u32 kStagingSize = 1024 * 1024;
+    const CKDWORD kMinStagedVertices = 32;
+
+    inline u8 *Align32(u8 *p)
+    {
+        return (u8 *)(((uintptr_t)p + 31) & ~(uintptr_t)31);
+    }
+}
+
+// Copies the vertices of a draw from engine memory into the staging area as
+// packed GX arrays: positions and normals as three floats, colours as RGBA,
+// texture coordinates as two floats. False when they do not fit this frame.
+CKBOOL CKGXRasterizerContext::StageVertices(const VertexSource &source, CKDWORD vertexCount, bool normals,
+                                            int texcoordSets, VertexSource &staged)
+{
+    if (!m_Staging)
+    {
+        m_Staging = (u8 *)memalign(32, kStagingSize);
+        if (!m_Staging)
+            return FALSE;
+    }
+    const u32 positionBytes = vertexCount * 12;
+    const u32 normalBytes = normals ? vertexCount * 12 : 0;
+    const u32 colorBytes = source.Diffuse ? vertexCount * 4 : 0;
+    const u32 texcoordBytes = vertexCount * 8;
+    const u32 needed = positionBytes + normalBytes + colorBytes + texcoordSets * texcoordBytes + (3 + texcoordSets) * 32;
+    if (needed > kStagingSize - m_StagingUsed)
+        return FALSE;
+
+    u8 *const start = m_Staging + m_StagingUsed;
+    u8 *out = start;
+    staged = source;
+    staged.Buffer = NULL;
+
+    float *positions = (float *)out;
+    for (CKDWORD v = 0; v < vertexCount; ++v)
+    {
+        const float *p = (const float *)(source.Position + (size_t)v * source.PositionStride);
+        positions[3 * v + 0] = p[0];
+        positions[3 * v + 1] = p[1];
+        positions[3 * v + 2] = p[2];
+    }
+    staged.Position = out;
+    staged.PositionStride = 12;
+    out = Align32(out + positionBytes);
+
+    if (normals)
+    {
+        float *normal = (float *)out;
+        for (CKDWORD v = 0; v < vertexCount; ++v)
+        {
+            const float *n = (const float *)(source.Normal + (size_t)v * source.NormalStride);
+            normal[3 * v + 0] = n[0];
+            normal[3 * v + 1] = n[1];
+            normal[3 * v + 2] = n[2];
+        }
+        staged.Normal = out;
+        staged.NormalStride = 12;
+        out = Align32(out + normalBytes);
+    }
+
+    if (source.Diffuse)
+    {
+        u32 *colors = (u32 *)out;
+        for (CKDWORD v = 0; v < vertexCount; ++v)
+            colors[v] = ToRGBA(*(const u32 *)(source.Diffuse + (size_t)v * source.DiffuseStride));
+        staged.Diffuse = out;
+        staged.DiffuseStride = 4;
+        out = Align32(out + colorBytes);
+    }
+
+    for (int set = 0; set < texcoordSets; ++set)
+    {
+        float *uv = (float *)out;
+        for (CKDWORD v = 0; v < vertexCount; ++v)
+        {
+            const float *t = (const float *)(source.Texcoord[set] + (size_t)v * source.TexcoordStride[set]);
+            uv[2 * v + 0] = t[0];
+            uv[2 * v + 1] = t[1];
+        }
+        staged.Texcoord[set] = out;
+        staged.TexcoordStride[set] = 8;
+        out = Align32(out + texcoordBytes);
+    }
+
+    DCStoreRange(start, (u32)(out - start));
+    m_StagingUsed += (u32)(out - start);
+    return TRUE;
+}
+
+CKBOOL CKGXRasterizerContext::CallDisplayList(CKGXBuffer &indexBuffer, VXPRIMITIVETYPE type, CKDWORD startIndex,
+                                              int indexCount, CKDWORD vertexCount, int attributes)
+{
+    for (int i = 0; i < indexBuffer.ListCount; ++i)
+    {
+        const CKGXDisplayList &list = indexBuffer.Lists[i];
+        if (list.StartIndex == startIndex && list.IndexCount == (CKDWORD)indexCount &&
+            list.VertexCount == vertexCount && list.Primitive == (u8)type && list.Attributes == (u8)attributes)
+        {
+            GX_CallDispList(list.Data, list.Size);
+            indexBuffer.UsedThisFrame = TRUE;
+            return TRUE;
+        }
+    }
+
+    // A buffer written this frame may be written every frame: keep sending
+    // its indices directly.
+    if (indexBuffer.LockedFrame == m_Stats.FrameNumber + 1)
+        return FALSE;
+    int batch = BatchSize(type);
+    if (batch == 0)
+    {
+        if (indexCount > 65535)
+            return FALSE;
+        batch = indexCount;
+    }
+    const u32 batches = (u32)((indexCount + batch - 1) / batch);
+    const u32 size = (batches * 3 + (u32)indexCount * (u32)attributes * 2 + 31) & ~31u;
+    if (size > kMaxDisplayListBytes - m_DisplayListBytes)
+        return FALSE;
+    if (indexBuffer.ListCount == indexBuffer.ListCapacity)
+    {
+        const int capacity = indexBuffer.ListCapacity ? indexBuffer.ListCapacity * 2 : 4;
+        CKGXDisplayList *lists =
+            (CKGXDisplayList *)realloc(indexBuffer.Lists, capacity * sizeof(CKGXDisplayList));
+        if (!lists)
+            return FALSE;
+        indexBuffer.Lists = lists;
+        indexBuffer.ListCapacity = capacity;
+    }
+    u8 *data = (u8 *)memalign(32, size);
+    if (!data)
+        return FALSE;
+
+    // The commands GX_Begin and GX_IndexNx16 would put in the FIFO, padded with
+    // GX_NOP (0) to whole 32-byte lines.
+    const CKWORD *indices = (const CKWORD *)indexBuffer.Data + startIndex;
+    const u8 primitive = (u8)(GXPrimitive(type) | GX_VTXFMT0);
+    u8 *out = data;
+    for (int start = 0; start < indexCount; start += batch)
+    {
+        const int n = (indexCount - start) < batch ? (indexCount - start) : batch;
+        *out++ = primitive;
+        *out++ = (u8)(n >> 8);
+        *out++ = (u8)n;
+        for (int i = 0; i < n; ++i)
+        {
+            const CKDWORD index = indices[start + i];
+            const u16 value = (u16)(index < vertexCount ? index : 0);
+            for (int a = 0; a < attributes; ++a)
+            {
+                *out++ = (u8)(value >> 8);
+                *out++ = (u8)value;
+            }
+        }
+    }
+    memset(out, 0, data + size - out);
+    DCFlushRange(data, size);
+
+    CKGXDisplayList &list = indexBuffer.Lists[indexBuffer.ListCount++];
+    list.Data = data;
+    list.Size = size;
+    list.StartIndex = startIndex;
+    list.IndexCount = (CKDWORD)indexCount;
+    list.VertexCount = vertexCount;
+    list.Primitive = (u8)type;
+    list.Attributes = (u8)attributes;
+    m_DisplayListBytes += size;
+
+    GX_CallDispList(data, size);
+    indexBuffer.UsedThisFrame = TRUE;
+    return TRUE;
+}
+
+// Drops an index buffer's display lists; ones the GPU may still read this
+// frame are freed once it is idle.
+void CKGXRasterizerContext::ReleaseDisplayLists(CKGXBuffer &indexBuffer, CKBOOL gpuMayRead)
+{
+    for (int i = 0; i < indexBuffer.ListCount; ++i)
+    {
+        m_DisplayListBytes -= indexBuffer.Lists[i].Size;
+        if (gpuMayRead)
+            m_PendingBufferFrees.PushBack(indexBuffer.Lists[i].Data);
+        else
+            free(indexBuffer.Lists[i].Data);
+    }
+    indexBuffer.ListCount = 0;
 }
 
 void CKGXRasterizerContext::BuildVertexSource(CKGXBuffer &buffer, CKDWORD startVertex, VertexSource &source) const
@@ -137,7 +332,8 @@ void CKGXRasterizerContext::BuildVertexSource(CKGXBuffer &buffer, CKDWORD startV
 }
 
 CKBOOL CKGXRasterizerContext::Submit(VXPRIMITIVETYPE type, const VertexSource &source, CKDWORD vertexCount,
-                                     const CKWORD *indices, int indexCount, CKDWORD baseVertex)
+                                     const CKWORD *indices, int indexCount, CKDWORD baseVertex,
+                                     CKGXBuffer *indexBuffer, CKDWORD startIndex)
 {
     const int count = indices ? indexCount : (int)vertexCount;
     ++m_FrameDrawCalls;
@@ -166,40 +362,57 @@ CKBOOL CKGXRasterizerContext::Submit(VXPRIMITIVETYPE type, const VertexSource &s
     // Vertex layout. Normals also feed sphere-map texture generation.
     const bool sendNormal = !pretransformed && source.Normal != NULL;
     const bool sendColor = source.Diffuse != NULL;
-    // Vertex buffer colours are already RGBA. GX arrays take an 8-bit stride
-    // and 16-bit indices.
-    const bool rgbaColors = source.Buffer != NULL;
-    const bool arrays = source.Buffer && source.PositionStride <= 255 && vertexCount <= 0x10000;
-    const u8 input = arrays ? GX_INDEX16 : GX_DIRECT;
-    GX_ClearVtxDesc();
-    GX_SetVtxDesc(GX_VA_POS, input);
-    GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_F32, 0);
-    if (arrays)
-        GX_SetArray(GX_VA_POS, (void *)source.Position, (u8)source.PositionStride);
-    if (sendNormal)
-    {
-        GX_SetVtxDesc(GX_VA_NRM, input);
-        GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_NRM, GX_NRM_XYZ, GX_F32, 0);
-        if (arrays)
-            GX_SetArray(GX_VA_NRM, (void *)source.Normal, (u8)source.NormalStride);
-    }
-    if (sendColor)
-    {
-        GX_SetVtxDesc(GX_VA_CLR0, input);
-        GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_CLR_RGBA, GX_RGBA8, 0);
-        if (arrays)
-            GX_SetArray(GX_VA_CLR0, (void *)source.Diffuse, (u8)source.DiffuseStride);
-    }
     int texcoordSets = 0;
-    for (int i = 0; i < source.TexcoordCount && i < 8; ++i)
+    while (texcoordSets < source.TexcoordCount && texcoordSets < 8 && source.Texcoord[texcoordSets])
+        ++texcoordSets;
+
+    // Engine memory drawn with indices that reuse its vertices: staged as arrays.
+    VertexSource stagedSource;
+    const bool staged = !source.Buffer && indices && baseVertex == 0 && vertexCount >= kMinStagedVertices &&
+                        vertexCount <= 0x10000 && (CKDWORD)count > vertexCount &&
+                        StageVertices(source, vertexCount, sendNormal, texcoordSets, stagedSource);
+    const VertexSource &vertices = staged ? stagedSource : source;
+
+    // Vertex buffer and staged colours are already RGBA. GX arrays take an
+    // 8-bit stride and 16-bit indices.
+    const bool rgbaColors = source.Buffer != NULL || staged;
+    const bool arrays = staged || (source.Buffer && source.PositionStride <= 255 && vertexCount <= 0x10000);
+    const u8 input = arrays ? GX_INDEX16 : GX_DIRECT;
+
+    // The vertex descriptor only when the attributes change; arrays every draw.
+    const u32 vertexFormat = (arrays ? 1u : 0u) | (sendNormal ? 2u : 0u) | (sendColor ? 4u : 0u) | ((u32)texcoordSets << 3);
+    if (!m_Applied.VertexFormatValid || m_Applied.VertexFormat != vertexFormat)
     {
-        if (!source.Texcoord[i])
-            break;
-        GX_SetVtxDesc(GX_VA_TEX0 + i, input);
-        GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0 + i, GX_TEX_ST, GX_F32, 0);
-        if (arrays)
-            GX_SetArray(GX_VA_TEX0 + i, (void *)source.Texcoord[i], (u8)source.TexcoordStride[i]);
-        texcoordSets = i + 1;
+        GX_ClearVtxDesc();
+        GX_SetVtxDesc(GX_VA_POS, input);
+        GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_F32, 0);
+        if (sendNormal)
+        {
+            GX_SetVtxDesc(GX_VA_NRM, input);
+            GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_NRM, GX_NRM_XYZ, GX_F32, 0);
+        }
+        if (sendColor)
+        {
+            GX_SetVtxDesc(GX_VA_CLR0, input);
+            GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_CLR_RGBA, GX_RGBA8, 0);
+        }
+        for (int i = 0; i < texcoordSets; ++i)
+        {
+            GX_SetVtxDesc(GX_VA_TEX0 + i, input);
+            GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0 + i, GX_TEX_ST, GX_F32, 0);
+        }
+        m_Applied.VertexFormatValid = true;
+        m_Applied.VertexFormat = vertexFormat;
+    }
+    if (arrays)
+    {
+        GX_SetArray(GX_VA_POS, (void *)vertices.Position, (u8)vertices.PositionStride);
+        if (sendNormal)
+            GX_SetArray(GX_VA_NRM, (void *)vertices.Normal, (u8)vertices.NormalStride);
+        if (sendColor)
+            GX_SetArray(GX_VA_CLR0, (void *)vertices.Diffuse, (u8)vertices.DiffuseStride);
+        for (int i = 0; i < texcoordSets; ++i)
+            GX_SetArray(GX_VA_TEX0 + i, (void *)vertices.Texcoord[i], (u8)vertices.TexcoordStride[i]);
     }
     if (source.Buffer)
         source.Buffer->UsedThisFrame = TRUE;
@@ -308,6 +521,9 @@ CKBOOL CKGXRasterizerContext::Submit(VXPRIMITIVETYPE type, const VertexSource &s
 
     // Every attribute of a vertex shares its index: send it once per attribute.
     const int attributeCount = 1 + (sendNormal ? 1 : 0) + (sendColor ? 1 : 0) + texcoordSets;
+    if (arrays && indexBuffer && indices && baseVertex == 0 &&
+        CallDisplayList(*indexBuffer, type, startIndex, count, vertexCount, attributeCount))
+        return TRUE;
     for (int start = 0; start < count; start += batch)
     {
         const int n = (count - start) < batch ? (count - start) : batch;
@@ -380,6 +596,7 @@ void CKGXRasterizerContext::DrawScreenQuad(float x0, float y0, float x1, float y
     GX_End();
 
     GX_SetColorUpdate(GX_TRUE);
+    ForgetAppliedState();
 }
 
 // System screens over the picture: the on-screen keyboard and the HOME menu.
@@ -481,6 +698,7 @@ void CKGXRasterizerContext::DrawOverlay()
             GX_End();
         }
     }
+    ForgetAppliedState();
 }
 
 // The Wii Remote pointer, drawn over the picture while the game shows its cursor.
@@ -554,4 +772,5 @@ void CKGXRasterizerContext::DrawPointer()
         }
         GX_End();
     }
+    ForgetAppliedState();
 }

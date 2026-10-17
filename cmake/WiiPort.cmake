@@ -257,6 +257,14 @@ function(ballance_wii_port_render_engine)
             FILES src/CKRenderContext.cpp src/CKRenderedScene.cpp
             TARGETS CK2_3D
     )
+    # Meshes skip the per-frame index range checks while their index arrays
+    # stay as they were (the GX rasterizer clamps indices anyway).
+    ballance_wii_patch(RenderEngineMesh
+            ROOT "${_root}"
+            PATCH "${BALLANCE_WII_PATCH_DIR}/RenderEngine/mesh-index-checks.patch"
+            FILES src/CKMesh.cpp
+            TARGETS CK2_3D
+    )
     _ballance_wii_resolve_target(_ck2_3d CK2_3D)
     target_compile_definitions(${_ck2_3d} PRIVATE CKRE_STATIC_GX_RASTERIZER)
     target_link_libraries(${_ck2_3d} PUBLIC CKGXRasterizer)

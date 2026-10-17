@@ -17,6 +17,10 @@
 // reuse that memory as soon as a draw returns. Vertex buffers are GX arrays
 // instead: the GPU reads them itself and the CPU only sends indices, so a
 // buffer still waiting to be drawn is copied rather than changed in place.
+// Indices from an index buffer are recorded once as a display list, which the
+// GPU fetches on its own every later frame. Larger indexed draws from engine
+// memory (meshes that change every frame) are copied into a staging area once
+// per vertex and drawn as GX arrays too, rather than sent whole for each index.
 
 void CKGXRasterizerGetInfo(CKRasterizerInfo *info);
 
@@ -56,6 +60,19 @@ struct CKGXTexture
     u32 DataSize;
 };
 
+// An index buffer range recorded for drawing from GX arrays: GX_Begin
+// commands and each index repeated once per vertex attribute.
+struct CKGXDisplayList
+{
+    void *Data;             // 32-byte aligned
+    u32 Size;
+    CKDWORD StartIndex;
+    CKDWORD IndexCount;
+    CKDWORD VertexCount;    // Indices from here on are drawn as 0
+    u8 Primitive;           // VXPRIMITIVETYPE
+    u8 Attributes;
+};
+
 struct CKGXBuffer
 {
     CKBYTE *Data;           // 32-byte aligned; vertex buffers are read by the GPU
@@ -67,6 +84,11 @@ struct CKGXBuffer
     u32 *Colors;            // Diffuse colours as GX RGBA, one per vertex
     CKVertexBufferDesc VertexDesc;
     CKIndexBufferDesc IndexDesc;
+    // Index buffers
+    CKGXDisplayList *Lists;
+    int ListCount;
+    int ListCapacity;
+    CKDWORD LockedFrame;    // Frame number of the last lock + 1, 0 if never locked
 };
 
 struct CKGXResource
@@ -226,9 +248,20 @@ private:
     void ApplyPixelState(CKBOOL pretransformed);
     void ApplyViewport(CKBOOL pretransformed);
 
+    // What the GX registers hold from the last draw, so the next one only sends
+    // what changed. Code that sets GX state itself (clears, system screens,
+    // the pointer, presenting) calls ForgetAppliedState afterwards.
+    void ForgetAppliedState();
+
     // Draw submission (CKGXDraw.cpp)
     CKBOOL Submit(VXPRIMITIVETYPE type, const VertexSource &source, CKDWORD vertexCount,
-                  const CKWORD *indices, int indexCount, CKDWORD baseVertex);
+                  const CKWORD *indices, int indexCount, CKDWORD baseVertex,
+                  CKGXBuffer *indexBuffer = NULL, CKDWORD startIndex = 0);
+    CKBOOL CallDisplayList(CKGXBuffer &indexBuffer, VXPRIMITIVETYPE type, CKDWORD startIndex, int indexCount,
+                           CKDWORD vertexCount, int attributes);
+    CKBOOL StageVertices(const VertexSource &source, CKDWORD vertexCount, bool normals, int texcoordSets,
+                         VertexSource &staged);
+    void ReleaseDisplayLists(CKGXBuffer &indexBuffer, CKBOOL gpuMayRead);
     void BuildVertexSource(CKGXBuffer &buffer, CKDWORD startVertex, VertexSource &source) const;
     void DrawScreenQuad(float x0, float y0, float x1, float y1, float z, CKDWORD color,
                         CKBOOL writeColor, CKBOOL writeDepth);
@@ -256,6 +289,9 @@ private:
     XArray<CKGXResource *> m_PendingFrees;
     XArray<void *> m_PendingBufferFrees;    // Vertex data replaced while the GPU may read it
     CKBOOL m_VertexCacheDirty;
+    u32 m_DisplayListBytes;
+    u8 *m_Staging;              // Vertices of this frame's staged draws
+    u32 m_StagingUsed;
 
     // Engine-visible state
     CKDWORD m_RenderStates[VXRENDERSTATE_MAXSTATE];
@@ -271,7 +307,56 @@ private:
     CKViewportData m_Viewport;
     VxPlane m_ClipPlanes[CKRST_MAX_USER_CLIP_PLANES];
 
+    enum AppliedTransform
+    {
+        TRANSFORM_UNKNOWN,
+        TRANSFORM_SCREEN,   // Pretransformed vertices, in pixels
+        TRANSFORM_WORLD
+    };
+
+    struct AppliedTexMap
+    {
+        bool Valid;
+        void *Data;
+        u16 Width, Height;
+        u8 Format, WrapS, WrapT, MinFilter, MagFilter, Anisotropy, MaxLod;
+        bool Mipmapped;
+        float Bias;
+    };
+
+    struct AppliedState
+    {
+        AppliedTransform Transform;
+        int ScreenWidth, ScreenHeight;
+        VxMatrix World, View, Projection;
+
+        bool ViewportValid;
+        f32 Viewport[6];
+        u32 Scissor[4];
+
+        bool ChannelsValid;
+        u8 ChannelKey[16];
+
+        bool VertexFormatValid;
+        u32 VertexFormat;
+
+        bool PixelValid;
+        u8 ZMode[3];
+        u8 AlphaCompare[3];
+        u8 Blend[4];
+        u8 Updates[2];
+        u8 Cull;
+        u8 Dither;
+        u8 PointSize;
+        u8 FogType;
+        f32 Fog[4];
+        GXColor FogColor;
+
+        AppliedTexMap TexMaps[8];
+    };
+
     XClassArray<CKGXReadback> m_Readbacks;
+    AppliedState m_Applied;
     XClassArray<GuardedState> m_GuardedStates;
     int m_GuardDepth;
 

@@ -39,6 +39,9 @@ CKGXRasterizerContext::CKGXRasterizerContext(CKRasterizerDriver *driver)
       m_TargetWidth(0),
       m_TargetHeight(0),
       m_VertexCacheDirty(TRUE),
+      m_DisplayListBytes(0),
+      m_Staging(NULL),
+      m_StagingUsed(0),
       m_LightsDirty(TRUE),
       m_GuardDepth(0),
       m_FrameDrawCalls(0),
@@ -48,6 +51,7 @@ CKGXRasterizerContext::CKGXRasterizerContext(CKRasterizerDriver *driver)
       m_FrameBufferUploads(0)
 {
     m_FrameBuffers[0] = m_FrameBuffers[1] = NULL;
+    ForgetAppliedState();
     memset(m_StageStates, 0, sizeof(m_StageStates));
     memset(m_StageSetMasks, 0, sizeof(m_StageSetMasks));
     memset(m_Textures, 0, sizeof(m_Textures));
@@ -63,6 +67,7 @@ CKGXRasterizerContext::CKGXRasterizerContext(CKRasterizerDriver *driver)
 CKGXRasterizerContext::~CKGXRasterizerContext()
 {
     BeginShutdown();
+    free(m_Staging);
 }
 
 void CKGXRasterizerContext::Diag(CKRST_DIAGNOSTIC diagnostic)
@@ -124,6 +129,13 @@ void CKGXRasterizerContext::InitVideo()
 
     GX_InvVtxCache();
     GX_InvalidateTexAll();
+    ForgetAppliedState();
+}
+
+void CKGXRasterizerContext::ForgetAppliedState()
+{
+    memset(&m_Applied, 0, sizeof(m_Applied));
+    m_Applied.Transform = TRANSFORM_UNKNOWN;
 }
 
 void CKGXRasterizerContext::CopyToScreen()
@@ -131,6 +143,7 @@ void CKGXRasterizerContext::CopyToScreen()
     GX_SetScissor(0, 0, m_Width, m_Height);
     GX_SetZMode(GX_TRUE, GX_LEQUAL, GX_TRUE);
     GX_SetColorUpdate(GX_TRUE);
+    ForgetAppliedState();
     m_FrameBuffer ^= 1;
     // Clear() draws its own quad, so the copy keeps the EFB: readbacks after
     // BackToFront see the frame just presented.
@@ -890,7 +903,7 @@ CKBOOL CKGXRasterizerContext::DrawPrimitiveVBIB(VXPRIMITIVETYPE type, CKDWORD vb
     VertexSource source;
     BuildVertexSource(vertices->Buffer, 0, source);
     const CKWORD *indices = (const CKWORD *)indexBuffer->Buffer.Data + startIndex;
-    return Submit(type, source, desc.m_MaxVertexCount, indices, indexCount, 0);
+    return Submit(type, source, desc.m_MaxVertexCount, indices, indexCount, 0, &indexBuffer->Buffer, startIndex);
 }
 
 // ---------------------------------------------------------------------------
@@ -930,6 +943,8 @@ void CKGXRasterizerContext::ReleaseResource(CKGXResource *resource)
     }
     else
     {
+        ReleaseDisplayLists(resource->Buffer, FALSE);
+        free(resource->Buffer.Lists);
         free(resource->Buffer.Data);
         free(resource->Buffer.Colors);
     }
@@ -964,6 +979,12 @@ void CKGXRasterizerContext::StoreVertices(CKGXBuffer &buffer, CKDWORD offset, CK
 // After GX_DrawDone: nothing queued reads a resource any more.
 void CKGXRasterizerContext::GpuIdle()
 {
+    // The staging area starts over; the GPU may hold its old vertices.
+    if (m_StagingUsed != 0)
+    {
+        m_StagingUsed = 0;
+        m_VertexCacheDirty = TRUE;
+    }
     for (int i = 0; i < m_PendingFrees.Size(); ++i)
         ReleaseResource(m_PendingFrees[i]);
     m_PendingFrees.Clear();
@@ -1169,8 +1190,13 @@ void *CKGXRasterizerContext::LockIndexBuffer(CKDWORD ib, CKDWORD startIndex, CKD
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return NULL;
     }
-    resource->Buffer.Locked = TRUE;
-    return resource->Buffer.Data + (size_t)startIndex * sizeof(CKWORD);
+    // Display lists recorded from the old indices go; draws queued this frame
+    // still read theirs.
+    CKGXBuffer &buffer = resource->Buffer;
+    ReleaseDisplayLists(buffer, buffer.UsedThisFrame);
+    buffer.LockedFrame = m_Stats.FrameNumber + 1;
+    buffer.Locked = TRUE;
+    return buffer.Data + (size_t)startIndex * sizeof(CKWORD);
 }
 
 CKBOOL CKGXRasterizerContext::UnlockIndexBuffer(CKDWORD ib)
@@ -1209,9 +1235,8 @@ CKBOOL CKGXRasterizerContext::DeleteObject(CKRST_HANDLE handle, CKRST_OBJECTTYPE
                 m_Textures[stage] = 0;
         }
     }
-    // The GPU may still read it this frame. Index buffers are only read by the CPU.
-    const CKBOOL used = type == CKRST_OBJ_TEXTURE ? resource->Texture.UsedThisFrame
-                                                  : (type == CKRST_OBJ_VERTEXBUFFER && resource->Buffer.UsedThisFrame);
+    // The GPU may still read it, or an index buffer's display lists, this frame.
+    const CKBOOL used = type == CKRST_OBJ_TEXTURE ? resource->Texture.UsedThisFrame : resource->Buffer.UsedThisFrame;
     if (used)
         m_PendingFrees.PushBack(resource);
     else

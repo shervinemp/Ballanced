@@ -302,11 +302,19 @@ CKBOOL CKGXRasterizerContext::BindTexture(int stage, int texmap)
     if (!resource || !resource->Texture.Data)
         return FALSE;
     CKGXTexture &texture = resource->Texture;
+    texture.UsedThisFrame = TRUE;
 
+    // Only the stage states the sampler reads, set or default.
     CKDWORD state[CKRST_TSS_MAXSTATE];
-    for (int i = 0; i < CKRST_TSS_MAXSTATE; ++i)
-        state[i] = (m_StageSetMasks[stage] & (UINT64_C(1) << i)) ? m_StageStates[stage][i]
-                                                                 : CKRSTDefaultTextureStageStateValue(stage, (CKRST_TEXTURESTAGESTATETYPE)i);
+    const CKRST_TEXTURESTAGESTATETYPE used[] = {CKRST_TSS_ADDRESS, CKRST_TSS_ADDRESSU, CKRST_TSS_ADDRESSV,
+                                                CKRST_TSS_MAGFILTER, CKRST_TSS_MINFILTER, CKRST_TSS_MIPMAPLODBIAS,
+                                                CKRST_TSS_MAXANISOTROPY};
+    for (size_t i = 0; i < sizeof(used) / sizeof(used[0]); ++i)
+    {
+        const CKRST_TEXTURESTAGESTATETYPE type = used[i];
+        state[type] = (m_StageSetMasks[stage] & (UINT64_C(1) << type)) ? m_StageStates[stage][type]
+                                                                       : CKRSTDefaultTextureStageStateValue(stage, type);
+    }
     const CKDWORD address = state[CKRST_TSS_ADDRESS];
     const u8 wrapS = WrapMode(state[CKRST_TSS_ADDRESSU] ? state[CKRST_TSS_ADDRESSU] : address);
     const u8 wrapT = WrapMode(state[CKRST_TSS_ADDRESSV] ? state[CKRST_TSS_ADDRESSV] : address);
@@ -331,24 +339,46 @@ CKBOOL CKGXRasterizerContext::BindTexture(int stage, int texmap)
         minFilter = mipmapped ? GX_NEAR_MIP_NEAR : GX_NEAR;
     }
 
+    float bias = 0.0f;
+    u8 anisotropy = GX_ANISO_1;
+    if (mipmapped)
+    {
+        const CKDWORD rawBias = state[CKRST_TSS_MIPMAPLODBIAS];
+        memcpy(&bias, &rawBias, sizeof(bias));
+        if (state[CKRST_TSS_MINFILTER] == VXTEXTUREFILTER_ANISOTROPIC || m_Options.ForceAnisotropicFiltering)
+            anisotropy = state[CKRST_TSS_MAXANISOTROPY] >= 4 || m_Options.ForceAnisotropicFiltering ? GX_ANISO_4 : GX_ANISO_2;
+    }
+
+    // A texture map keeps its sampler while draws use the same texture the same way.
+    AppliedTexMap &applied = m_Applied.TexMaps[texmap & 7];
+    if (applied.Valid && applied.Data == texture.Data && applied.Width == texture.Width &&
+        applied.Height == texture.Height && applied.Format == texture.Format && applied.WrapS == wrapS &&
+        applied.WrapT == wrapT && applied.MinFilter == minFilter && applied.MagFilter == magFilter &&
+        applied.Mipmapped == mipmapped && applied.MaxLod == texture.Levels && applied.Anisotropy == anisotropy &&
+        applied.Bias == bias)
+        return TRUE;
+
     GXTexObj object;
     GX_InitTexObj(&object, texture.Data, texture.Width, texture.Height, texture.Format, wrapS, wrapT,
                   mipmapped ? GX_TRUE : GX_FALSE);
     if (mipmapped)
-    {
-        float bias;
-        const CKDWORD rawBias = state[CKRST_TSS_MIPMAPLODBIAS];
-        memcpy(&bias, &rawBias, sizeof(bias));
-        u8 anisotropy = GX_ANISO_1;
-        if (state[CKRST_TSS_MINFILTER] == VXTEXTUREFILTER_ANISOTROPIC || m_Options.ForceAnisotropicFiltering)
-            anisotropy = state[CKRST_TSS_MAXANISOTROPY] >= 4 || m_Options.ForceAnisotropicFiltering ? GX_ANISO_4 : GX_ANISO_2;
         GX_InitTexObjLOD(&object, minFilter, magFilter, 0.0f, (f32)(texture.Levels - 1), bias, GX_FALSE, GX_TRUE, anisotropy);
-    }
     else
-    {
         GX_InitTexObjFilterMode(&object, minFilter, magFilter);
-    }
     GX_LoadTexObj(&object, (u8)texmap);
-    texture.UsedThisFrame = TRUE;
+
+    applied.Valid = true;
+    applied.Data = texture.Data;
+    applied.Width = texture.Width;
+    applied.Height = texture.Height;
+    applied.Format = texture.Format;
+    applied.WrapS = wrapS;
+    applied.WrapT = wrapT;
+    applied.MinFilter = minFilter;
+    applied.MagFilter = magFilter;
+    applied.Mipmapped = mipmapped;
+    applied.MaxLod = texture.Levels;
+    applied.Anisotropy = anisotropy;
+    applied.Bias = bias;
     return TRUE;
 }

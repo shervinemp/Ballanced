@@ -1,0 +1,162 @@
+--- a/src/CKMesh.cpp
++++ b/src/CKMesh.cpp
+@@ -289,6 +289,54 @@ static CKBOOL CKMeshGroupIndicesFit(const CKMaterialGroup *group, CKDWORD vertex
+     return TRUE;
+ }
+ 
++#if defined(CKRE_STATIC_GX_RASTERIZER)
++// The index range checks of CheckHWVertexBuffer and CheckHWIndexBuffer read
++// every index of every mesh drawn, each frame: a quarter of the Wii's drawing
++// time. A mesh whose index arrays, vertex counts and base vertices are as they
++// were when the checks last passed is not checked again. The GX rasterizer
++// clamps indices itself, so a change the key misses could misdraw a mesh but
++// not read outside its vertex buffer.
++static XHashTable<CKDWORD, RCKMesh *> g_FitCheckedMeshes;
++static XHashTable<CKDWORD, RCKMesh *> g_RangeCheckedMeshes;
++
++// A fingerprint of the index arrays: where they are, their lengths and a few
++// of their values, with the vertex counts and base vertices they index.
++static CKDWORD CKMeshIndexLayoutKey(const XArray<CKMaterialGroup *> &groups, CKDWORD vertexCount,
++                                    CKDWORD bufferVertexCount) {
++    CKDWORD key = 2166136261u;
++    auto mix = [&key](CKDWORD value) { key = (key ^ value) * 16777619u; };
++    mix(vertexCount);
++    mix(bufferVertexCount);
++    mix((CKDWORD)groups.Size());
++    for (int i = 0; i < groups.Size(); ++i) {
++        const CKMaterialGroup *group = groups[i];
++        if (!IsRenderableMaterialGroup(group)) {
++            mix(0);
++            continue;
++        }
++        mix((CKDWORD)(CKUINTPTR)group);
++        mix(group->m_BaseVertex);
++        mix(group->m_VertexCount);
++        mix(group->m_RemapData ? 1u : 0u);
++        mix((CKDWORD)group->m_Primitives.Size());
++        for (int p = 0; p < group->m_Primitives.Size(); ++p) {
++            const XArray<CKWORD> &indices = group->m_Primitives[p].m_Indices;
++            const int count = indices.Size();
++            mix((CKDWORD)(CKUINTPTR)indices.Begin());
++            mix((CKDWORD)count);
++            if (count > 0)
++                mix((CKDWORD)indices[0] | ((CKDWORD)indices[count / 2] << 16) ^ ((CKDWORD)indices[count - 1] << 8));
++        }
++    }
++    return key;
++}
++
++static CKBOOL CKMeshLayoutChecked(XHashTable<CKDWORD, RCKMesh *> &checked, RCKMesh *mesh, CKDWORD key) {
++    CKDWORD value = 0;
++    return checked.LookUp(mesh, value) && value == key;
++}
++#endif
++
+ /**
+  * @brief Progressive mesh pre-render callback for LOD processing.
+  *
+@@ -373,6 +421,10 @@ RCKMesh::RCKMesh(CKContext *Context, CKSTRING name) : CKMesh(Context, name) {
+ // Destructor
+ RCKMesh::~RCKMesh() {
+     // Match IDA at 0x1001bc99
++#if defined(CKRE_STATIC_GX_RASTERIZER)
++    g_FitCheckedMeshes.Remove(this);
++    g_RangeCheckedMeshes.Remove(this);
++#endif
+ 
+     // Clean up material channels (sub_1001BE0B in IDA)
+     for (int i = 0; i < m_MaterialChannels.Size(); i++) {
+@@ -5495,6 +5547,13 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
+                              layout.TexcoordCount > 0 &&
+                              data->TexCoordPtr != nullptr;
+ 
++#if defined(CKRE_STATIC_GX_RASTERIZER)
++    const CKDWORD fitKey = CKMeshIndexLayoutKey(m_MaterialGroups, (CKDWORD)data->VertexCount, 0);
++    const CKBOOL fitChecked = CKMeshLayoutChecked(g_FitCheckedMeshes, this, fitKey);
++#else
++    const CKBOOL fitChecked = FALSE;
++#endif
++
+     if (wrapAware) {
+         CKDWORD totalVertexCount = 0;
+         for (int i = 0; i < m_MaterialGroups.Size(); i++) {
+@@ -5503,7 +5562,7 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
+                 continue;
+             const CKDWORD sourceVertexCount = group->m_RemapData && group->m_VertexCount > 0
+                 ? group->m_VertexCount : (CKDWORD)data->VertexCount;
+-            if (!CKMeshGroupIndicesFit(group, sourceVertexCount)) {
++            if (!fitChecked && !CKMeshGroupIndicesFit(group, sourceVertexCount)) {
+                 m_VertexBufferReady = 0;
+                 m_IndexBufferReady = FALSE;
+                 m_VertexBufferWrapAware = FALSE;
+@@ -5527,6 +5586,9 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
+ 
+         if (totalVertexCount == 0)
+             return FALSE;
++#if defined(CKRE_STATIC_GX_RASTERIZER)
++        g_FitCheckedMeshes.Insert(this, fitKey, TRUE);
++#endif
+ 
+         const CKBOOL geometryChanged = (m_Flags & geometryChangedFlags) != 0;
+ 
+@@ -5699,7 +5761,7 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
+         if (!IsRenderableMaterialGroup(group))
+             continue;
+         if (group->m_RemapData && group->m_VertexCount > 0) {
+-            if (!CKMeshGroupIndicesFit(group, group->m_VertexCount) ||
++            if ((!fitChecked && !CKMeshGroupIndicesFit(group, group->m_VertexCount)) ||
+                 !CKMeshAccumulateCount(group->m_VertexCount, 0x10000u, totalVertexCount)) {
+                 m_VertexBufferReady = 0;
+                 m_IndexBufferReady = FALSE;
+@@ -5707,7 +5769,7 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
+             }
+             hasRemappedVertices = TRUE;
+         } else {
+-            if (!CKMeshGroupIndicesFit(group, (CKDWORD)data->VertexCount)) {
++            if (!fitChecked && !CKMeshGroupIndicesFit(group, (CKDWORD)data->VertexCount)) {
+                 m_VertexBufferReady = 0;
+                 m_IndexBufferReady = FALSE;
+                 return FALSE;
+@@ -5720,6 +5782,9 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
+         m_IndexBufferReady = FALSE;
+         return FALSE;
+     }
++#if defined(CKRE_STATIC_GX_RASTERIZER)
++    g_FitCheckedMeshes.Insert(this, fitKey, TRUE);
++#endif
+ 
+     if (totalVertexCount == 0)
+         return FALSE;
+@@ -5864,6 +5929,12 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
+ 
+     CKBOOL needUpdate = !m_IndexBufferReady;
+     CKDWORD totalIndexCount = 0;
++#if defined(CKRE_STATIC_GX_RASTERIZER)
++    const CKDWORD rangeKey = CKMeshIndexLayoutKey(m_MaterialGroups, 0, m_VertexBufferVertexCount);
++    const CKBOOL rangeChecked = CKMeshLayoutChecked(g_RangeCheckedMeshes, this, rangeKey);
++#else
++    const CKBOOL rangeChecked = FALSE;
++#endif
+ 
+     // Count total indices needed and check if any group needs update
+     for (int i = 0; i < m_MaterialGroups.Size(); i++) {
+@@ -5879,7 +5950,7 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
+                 m_IndexBufferReady = FALSE;
+                 return FALSE;
+             }
+-            for (CKDWORD index = 0; index < indexCount; ++index) {
++            for (CKDWORD index = 0; !rangeChecked && index < indexCount; ++index) {
+                 const CKDWORD value = prim->m_Indices[index];
+                 if (group->m_BaseVertex > 0xffffu - value ||
+                     group->m_BaseVertex + value >= m_VertexBufferVertexCount) {
+@@ -5892,6 +5963,10 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
+             }
+         }
+     }
++#if defined(CKRE_STATIC_GX_RASTERIZER)
++    if (!rangeChecked)
++        g_RangeCheckedMeshes.Insert(this, rangeKey, TRUE);
++#endif
+ 
+     if (totalIndexCount == 0) {
+         m_IndexBufferReady = TRUE;
