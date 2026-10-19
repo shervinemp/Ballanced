@@ -39,6 +39,7 @@ void RunRasterizerTests();
 void RunSceneTests(CKContext *context);
 void RunSoundTests(CKContext *context);
 void RunPhysicsTests(CKContext *context);
+void RunPhysicsShapeTests(CKContext *context, bool storage);
 void RunFontTests(CKContext *context);
 void RunBehaviorTests(CKContext *context);
 void RunDatabaseTests(CKContext *context);

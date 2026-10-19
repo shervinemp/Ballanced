@@ -87,6 +87,7 @@ int main(int argc, char **argv)
     RunBehaviorTests(context);
     RunInputTests(context);
     RunPhysicsTests(context);
+    RunPhysicsShapeTests(context, storage);
     if (storage)
         BuildDemoComposition(context);
 

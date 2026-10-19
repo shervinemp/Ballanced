@@ -2,6 +2,7 @@
 #define AUTOPLAYSCRIPT_H
 
 #include "CKAll.h"
+#include "WiiPhysicsShapes.h"
 
 class WiiGamePlayer;
 
@@ -14,7 +15,8 @@ class WiiGamePlayer;
 //   waitplay [<frames>]         wait (at most that long) until the game is in
 //                               play, listening for its camera keys
 //   report start                start counting frame times
-//   report stop                 log the frame times since "report start"
+//   report stop                 log the frame times since "report start", and
+//                               the collision surfaces built or reused
 //   profile start [<us>]        sample the CPU every <us> microseconds (1000), up
 //                               to 40000 samples
 //   profile stop <file>         write the samples (Source/WiiPlayer/tools/wii_profile.py)
@@ -67,6 +69,7 @@ private:
     int m_Next;
     int m_Remaining; // Frames left of the current timed command, -1 before it starts
     XString m_Folder;
+    wiiphysicsshapes::Stats m_Shapes; // At "report start"
 };
 
 #endif // AUTOPLAYSCRIPT_H

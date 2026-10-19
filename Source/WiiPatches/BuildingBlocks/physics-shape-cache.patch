@@ -1,0 +1,133 @@
+diff --git a/physics_RT/CKIpionManager.cpp b/physics_RT/CKIpionManager.cpp
+index 1b87164..5dd48b1 100644
+--- a/physics_RT/CKIpionManager.cpp
++++ b/physics_RT/CKIpionManager.cpp
+@@ -11,6 +11,8 @@
+ #include "ivp_surbuild_pointsoup.hxx"
+ #include "ivp_surman_polygon.hxx"
+ 
++#include "WiiPhysicsShapes.h"
++
+ static bool IsPhysicsHandleBehavior(CKGUID guid)
+ {
+     return guid == CKGUID(0x5e624f0a, 0x35160450) || // Set Physics Ball Joint
+@@ -33,11 +35,56 @@ static void DeleteCollisionSurfaceOwner(PhysicsCollisionSurface *surface)
+         return;
+ 
+     delete surface->m_SurfaceManager;
+-    if (surface->m_CompactSurface)
+-        ivp_free_aligned(surface->m_CompactSurface);
++    // Shared surfaces go back to the shape cache, which frees the others.
++    wiiphysicsshapes::Release(surface->m_CompactSurface);
+     delete surface;
+ }
+ 
++struct CollisionSurfaceBuild
++{
++    CKContext *Context;
++    CK3dEntity *Target;
++};
++
++// Builds a named collision surface the shape cache does not have.
++static IVP_Compact_Surface *BuildCollisionSurface(const wiiphysicsshapes::Source &source, void *user)
++{
++    const CollisionSurfaceBuild *build = (const CollisionSurfaceBuild *)user;
++    VxVector scale = source.Scale;
++    IVP_SurfaceBuilder_Ledge_Soup builder;
++    int ledgeCount = 0;
++
++    if (source.ConvexCount > 0)
++    {
++        for (int i = 0; i < source.ConvexCount; i++)
++        {
++            if (source.Convexes[i])
++            {
++                ledgeCount += CKIpionManager::AddConvexSurface(&builder, source.Convexes[i], &scale);
++            }
++        }
++    }
++
++    if (source.ConcaveCount > 0)
++    {
++        for (int i = 0; i < source.ConcaveCount; i++)
++        {
++            if (source.Concaves[i])
++            {
++                CKIpionManager::AddConcaveSurface(&builder, source.Concaves[i], &scale);
++                ++ledgeCount;
++            }
++        }
++    }
++
++    if (ledgeCount == 0)
++    {
++        build->Context->OutputToConsoleEx("Error: incorrect mesh for %s !\n", build->Target->GetName());
++        return NULL;
++    }
++    return builder.compile();
++}
++
+ class PhysicsObjectListener : public IVP_Listener_Object
+ {
+ public:
+@@ -458,47 +505,20 @@ int CKIpionManager::CreatePhysicsObjectOnParameters(CK3dEntity *target, int conv
+         IVP_SurfaceManager *surman = GetCollisionSurface(collisionSurface);
+         if (!surman)
+         {
+-            IVP_SurfaceBuilder_Ledge_Soup builder;
+-            int ledgeCount = 0;
+-
+-            if (convexCount > 0)
+-            {
+-                for (int i = 0; i < convexCount; i++)
+-                {
+-                    if (convexes[i])
+-                    {
+-                        ledgeCount += AddConvexSurface(&builder, convexes[i], &scale);
+-                    }
+-                }
+-            }
+-
+-            if (concaveCount > 0)
+-            {
+-                for (int i = 0; i < concaveCount; i++)
+-                {
+-                    if (concaves[i])
+-                    {
+-                        AddConcaveSurface(&builder, concaves[i], &scale);
+-                        ++ledgeCount;
+-                    }
+-                }
+-            }
+-
+-            if (ledgeCount != 0)
+-            {
+-                IVP_Compact_Surface *compactSurface = builder.compile();
+-                if (compactSurface)
+-                {
+-                    surman = new IVP_SurfaceManager_Polygon(compactSurface);
+-                    if (surman)
+-                        AddCollisionSurface(collisionSurface, surman, compactSurface);
+-                    else
+-                        ivp_free_aligned(compactSurface);
+-                }
+-            }
+-            else
++            // The shape cache hands out the surface built from the same
++            // geometry before, by this or another object, in this level or an
++            // earlier one, and builds it otherwise.
++            const wiiphysicsshapes::Source source = {convexCount, convexes, concaveCount, concaves, scale};
++            CollisionSurfaceBuild build = {m_Context, target};
++            IVP_Compact_Surface *compactSurface =
++                wiiphysicsshapes::Acquire(source, collisionSurface, BuildCollisionSurface, &build);
++            if (compactSurface)
+             {
+-                m_Context->OutputToConsoleEx("Error: incorrect mesh for %s !\n", target->GetName());
++                surman = new IVP_SurfaceManager_Polygon(compactSurface);
++                if (surman)
++                    AddCollisionSurface(collisionSurface, surman, compactSurface);
++                else
++                    wiiphysicsshapes::Release(compactSurface);
+             }
+         }
+ 

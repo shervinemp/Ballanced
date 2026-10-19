@@ -176,6 +176,28 @@ function(ballance_wii_patch name)
     endforeach ()
 endfunction()
 
+# Identifies the physics engine a build makes collision surfaces with: its
+# sources, the Wii patches to them and the compiler. Cache files of built
+# surfaces (WiiPhysicsShapes.cpp) are only read back by a build with the same
+# identity; changing any of these files configures again.
+function(_ballance_wii_physics_builder_id out ivp_dir)
+    file(GLOB_RECURSE _files "${ivp_dir}/*.cxx" "${ivp_dir}/*.hxx" "${ivp_dir}/*.cpp" "${ivp_dir}/*.h"
+            "${ivp_dir}/*.c")
+    file(GLOB _patches "${BALLANCE_WII_PATCH_DIR}/BuildingBlocks/ivp-*.patch")
+    list(SORT _files)
+    list(SORT _patches)
+    string(TOUPPER "${CMAKE_BUILD_TYPE}" _config)
+    set(_digest "${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION} ${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${_config}}")
+    foreach (_file IN LISTS _files _patches)
+        file(SHA1 "${_file}" _hash)
+        file(RELATIVE_PATH _name "${PROJECT_SOURCE_DIR}" "${_file}")
+        string(APPEND _digest "\n${_name} ${_hash}")
+    endforeach ()
+    string(SHA1 _id "${_digest}")
+    set_property(DIRECTORY "${PROJECT_SOURCE_DIR}" APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_files} ${_patches})
+    set(${out} "${_id}" PARENT_SCOPE)
+endfunction()
+
 # --- Component hooks, called from Source/CMakeLists.txt after each add_subdirectory ---
 
 # VxMath: the libogc platform layer replaces the SDL3 one.
@@ -379,6 +401,22 @@ function(ballance_wii_port_building_blocks)
             FILES physics_RT/ivp/ivp_compact_builder/ivp_surbuild_ledge_soup.cxx
             TARGETS ivp_compact_builder
     )
+    # Physicalize keeps the collision surfaces it builds by the geometry they
+    # come from, in memory and in Wii/Cache/ next to the game, so loading a
+    # level again does not build them again (WiiPhysicsShapes.h).
+    ballance_wii_patch(PhysicsShapes
+            ROOT "${_root}"
+            PATCH "${BALLANCE_WII_PATCH_DIR}/BuildingBlocks/physics-shape-cache.patch"
+            FILES physics_RT/CKIpionManager.cpp
+            TARGETS physics_RTStatic
+    )
+    set(_shapes "${BALLANCE_WII_PLATFORM_DIR}/Physics/WiiPhysicsShapes.cpp")
+    _ballance_wii_resolve_target(_physics physics_RTStatic)
+    target_sources(${_physics} PRIVATE "${_shapes}")
+    target_include_directories(${_physics} PUBLIC "$<BUILD_INTERFACE:${BALLANCE_WII_PLATFORM_DIR}/Physics>")
+    _ballance_wii_physics_builder_id(_builder "${_root}/physics_RT/ivp")
+    set_source_files_properties("${_shapes}" TARGET_DIRECTORY ${_physics}
+            PROPERTIES COMPILE_DEFINITIONS "WII_PHYSICS_SHAPES_BUILDER=\"${_builder}\"")
     # Fonts: big-endian font manager chunks and atlas texels; with no system
     # fonts, TrueType fonts come from a Fonts folder next to the game, and font
     # indices from the PC's font list fall back to Arial or Roboto.
