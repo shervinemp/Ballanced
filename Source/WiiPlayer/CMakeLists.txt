@@ -155,6 +155,7 @@ add_executable(WiiPlayerTests
         tests/SoundTests.cpp
         tests/DemoComposition.cpp
         tests/PhysicsTests.cpp
+        tests/PhysicsShapeTests.cpp
         tests/FontTests.cpp
         tests/BehaviorTests.cpp
         tests/DatabaseTests.cpp

@@ -333,9 +333,12 @@ apps/ballance/
                   (e.g. Arial) to match the PC game's text exactly
   Wii/Text/       tutorial texts naming the Wii controls, read instead of the
                   game's own (installed with boot.dol)
+  Wii/Cache/      collision surfaces the game has built (written by the game)
 ```
 
 Start it from the Homebrew Channel. The game runs from the folder `boot.dol` was started from, on an SD card or a USB drive; when the loader passes no path it looks for `apps/ballance/` or `ballance/` on either device. `Player.ini` and `Player.log` are written to that folder, and so are the game's settings and high scores (`Database.tdb`, `registry.ini`).
+
+Loading a level builds a collision surface for each physical object from its meshes; in Dolphin that was over a third of the game's work while Level 12 loads. The game keeps the surfaces it builds, keyed by the geometry they come from: in memory, so loading a level again after leaving it reuses them, and in `Wii/Cache/PhysicsShapes.dat` and `PhysicsShapes.idx`, which a background thread writes while the game waits for the TV, so the next start can read them instead. A surface is only read when that has been quicker than building it was, judged by how fast the card has read so far: Dolphin reads its SD card at once, a console reads a few megabytes a second, so there the large floors of a level may still be built. The files grow with each level played (Level 12 adds about 5.5 MB; they stop growing at 64 MB), may be deleted while the game is not running, and are started afresh when another build of the game's physics engine finds them. Under `[Wii]` in `Player.ini`, `PhysicsCache` chooses where surfaces are kept (0 nowhere, 1 in memory, 2 in memory and in the files, the default), `PhysicsCacheMemory` how many megabytes of surfaces no object uses stay in memory (8; they give way whenever less than 16 MB are free), and `PhysicsCacheLog = 1` lists each surface in `Player.log` with where it came from and a hash of its structure. `PhysicsCacheVerify = 1` builds every reused surface again and logs any that differ (slow; for checking a build).
 
 ### Playing
 
@@ -392,7 +395,8 @@ report start
 profile start 500              # a sample every 500 microseconds
 wait 600
 profile stop menu.prof
-report stop                    # frame times since "report start", to Player.log
+report stop                    # frame times since "report start", and the
+                               # collision surfaces built or reused, to Player.log
 hold 4 Enter                   # Start
 wait 180
 hold 4 Enter                   # Level 1

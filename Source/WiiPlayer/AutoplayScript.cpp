@@ -9,6 +9,7 @@
 #include "Utils.h"
 #include "WiiAutoplay.h"
 #include "WiiGamePlayer.h"
+#include "WiiPhysicsShapes.h"
 #include "WiiProfiler.h"
 #include "WiiSystem.h"
 
@@ -78,10 +79,35 @@ namespace
         }
         return fclose(file) == 0 && ok;
     }
+
+    double Milliseconds(unsigned long long after, unsigned long long before)
+    {
+        return (double)(after - before) / 1000.0;
+    }
+
+    // Collision surfaces made since a report started, and where they came from.
+    void LogPhysicsShapes(const wiiphysicsshapes::Stats &before)
+    {
+        wiiphysicsshapes::Stats now;
+        wiiphysicsshapes::GetStats(now);
+        CLogger::Get().Info("Physics shapes: %u built (%.1f ms), %u from memory (%.1f ms), %u from the cache files "
+                            "(%.1f ms), %u built rather than read, %u rejected, %u written, %u verified (%u differ); "
+                            "%u KB in use, %u KB kept",
+                            now.Built - before.Built, Milliseconds(now.BuildMicroseconds, before.BuildMicroseconds),
+                            now.FromMemory - before.FromMemory,
+                            Milliseconds(now.MemoryMicroseconds, before.MemoryMicroseconds),
+                            now.FromStorage - before.FromStorage,
+                            Milliseconds(now.StorageMicroseconds, before.StorageMicroseconds),
+                            now.Skipped - before.Skipped, now.Rejected - before.Rejected,
+                            now.Written - before.Written,
+                            now.Verified - before.Verified, now.Mismatched - before.Mismatched,
+                            now.BytesInUse >> 10, now.BytesUnused >> 10);
+    }
 }
 
 AutoplayScript::AutoplayScript() : m_Next(0), m_Remaining(-1)
 {
+    memset(&m_Shapes, 0, sizeof(m_Shapes));
 }
 
 bool AutoplayScript::Load(const char *path, CKContext *context)
@@ -227,9 +253,11 @@ void AutoplayScript::Execute(const Command &command, WiiGamePlayer &player)
     {
     case REPORT_START:
         player.StartFrameReport();
+        wiiphysicsshapes::GetStats(m_Shapes);
         break;
     case REPORT_STOP:
         player.LogFrameReport();
+        LogPhysicsShapes(m_Shapes);
         break;
     case PROFILE_START:
         if (!wiiprofiler::Start((u32)command.Frames, 40000))

@@ -5,10 +5,57 @@
 #include "Utils.h"
 #include "VxWiiPlatform.h"
 #include "WiiGamePlayer.h"
+#include "WiiPhysicsShapes.h"
 #include "WiiSystem.h"
 
 namespace
 {
+    void LogPhysicsShapes(const char *text)
+    {
+        CLogger::Get().Info("%s", text);
+    }
+
+    unsigned int FreeMemory()
+    {
+        u32 available = 0;
+        wiisystem::GetMemoryStatus(NULL, &available);
+        return available;
+    }
+
+    // Collision surfaces built while loading stay in memory, and in Wii/Cache/
+    // for the next start, so loading a level again does not build them again.
+    // [Wii] PhysicsCache = 0 (off), 1 (memory) or 2 (memory and cache files);
+    // PhysicsCacheMemory = megabytes of unused surfaces kept (the level before)
+    // while more than 16 MB are free; PhysicsCacheVerify and PhysicsCacheLog
+    // check and list the surfaces.
+    void ConfigurePhysicsShapes(bool haveIni, const char *iniPath, const char *gamePath)
+    {
+        int mode = wiiphysicsshapes::STORAGE;
+        int megabytes = 8;
+        bool verify = false, log = false;
+        if (haveIni)
+        {
+            utils::IniGetInteger("Wii", "PhysicsCache", mode, iniPath);
+            utils::IniGetInteger("Wii", "PhysicsCacheMemory", megabytes, iniPath);
+            utils::IniGetBoolean("Wii", "PhysicsCacheVerify", verify, iniPath);
+            utils::IniGetBoolean("Wii", "PhysicsCacheLog", log, iniPath);
+        }
+        static char folder[256];
+        snprintf(folder, sizeof(folder), "%sWii/Cache/", gamePath);
+        wiiphysicsshapes::Settings settings;
+        settings.CacheMode = mode <= 0 ? wiiphysicsshapes::OFF
+                             : mode == 1 ? wiiphysicsshapes::MEMORY
+                                         : wiiphysicsshapes::STORAGE;
+        settings.MemoryBudget = (unsigned int)(megabytes > 0 ? megabytes : 0) << 20;
+        settings.MemoryReserve = 16u << 20;
+        settings.FreeMemory = FreeMemory;
+        settings.Folder = folder;
+        settings.Verify = verify;
+        settings.LogShapes = log;
+        settings.Log = LogPhysicsShapes;
+        wiiphysicsshapes::Configure(settings);
+    }
+
     // Ballance's language for the console's: 0 German, 1 English, 2 Spanish,
     // 3 Italian, 4 French. Other languages get English.
     int ConsoleLanguage()
@@ -63,6 +110,7 @@ int main(int argc, char **argv)
         CLogger::Get().Open(logPath.CStr(), config.logMode == eLogOverwrite,
                             config.verbose ? CLogger::LEVEL_DEBUG : CLogger::LEVEL_INFO);
     CLogger::Get().Info("Ballance for Wii starting from %s", gamePath);
+    ConfigurePhysicsShapes(haveIni, iniPath.CStr(), gamePath);
 
     XString cmoPath;
     if (!config.ResolvePath(eCmoPath, cmoPath) || !utils::FileOrDirectoryExists(cmoPath.CStr()))
@@ -101,6 +149,8 @@ int main(int argc, char **argv)
         }
         player.Shutdown();
     }
+    // Finish writing the shape cache while the storage device is mounted.
+    wiiphysicsshapes::Shutdown();
 
     if (!config.SaveToIni() ||
         (haveIni && !utils::IniSetBoolean("Wii", "TiltControls", wiisystem::GetTiltControls(), iniPath.CStr())))
